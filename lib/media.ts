@@ -99,3 +99,11 @@ export async function checkInternet(): Promise<'ok' | 'bad'> {
     clearTimeout(timer);
   }
 }
+
+/**
+ * Deletes every exercise video (used by "Clear everything").
+ */
+export function deleteAllMedia(): void {
+  const dir = new Directory(Paths.document, VIDEO_DIR);
+  if (dir.exists) dir.delete();
+}

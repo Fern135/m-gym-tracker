@@ -78,16 +78,37 @@ export async function cancelAll(): Promise<void> {
   );
 }
 
+/**
+ * Current notification permission.
+ * @returns Whether it's granted, and whether the OS will still show the prompt
+ */
+export async function getPermission(): Promise<{ granted: boolean; canAskAgain: boolean }> {
+  try {
+    const { granted, canAskAgain } = await Notifications.getPermissionsAsync();
+    return { granted, canAskAgain };
+  } catch {
+    return { granted: false, canAskAgain: false };
+  }
+}
+
 let queue: Promise<void> = Promise.resolve();
+let waiting: Promise<void> | null = null;
 
 /**
  * Cancels all workout reminders and schedules the next 4 weeks again.
  * Calls run one after another so two quick changes can't interleave and leave stale reminders.
+ * Calls made while a pass is still waiting to start share it, since it reads the newest settings anyway
+ * (tapping the workout-time stepper 8 times runs at most 2 passes, not 8).
  * Never throws: a notification failure must not fail the save that triggered it.
  */
 export function rescheduleAll(): Promise<void> {
-  queue = queue.then(reschedule);
-  return queue;
+  if (waiting) return waiting;
+  waiting = queue.then(() => {
+    waiting = null;
+    return reschedule();
+  });
+  queue = waiting;
+  return waiting;
 }
 
 /** One reschedule pass; see rescheduleAll. */

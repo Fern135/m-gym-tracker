@@ -59,6 +59,27 @@ export async function getLeadTimes(): Promise<LeadTime[]> {
 }
 
 /**
+ * @param enabled - Master switch for workout notifications
+ */
+export async function setNotificationsEnabled(enabled: boolean): Promise<void> {
+  await setSetting('notifications_enabled', String(enabled));
+}
+
+/**
+ * @param time - Workout time, stored as "HH:MM"
+ */
+export async function setWorkoutTime({ hour, minute }: { hour: number; minute: number }): Promise<void> {
+  await setSetting('notification_workout_time', `${String(hour).padStart(2, '0')}:${String(minute).padStart(2, '0')}`);
+}
+
+/**
+ * @param leads - Enabled lead times, stored as a JSON array
+ */
+export async function setLeadTimes(leads: LeadTime[]): Promise<void> {
+  await setSetting('notification_lead_times', JSON.stringify(leads));
+}
+
+/**
  * @returns The theme preference
  */
 export async function getTheme(): Promise<ThemeSetting> {

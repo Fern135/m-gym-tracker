@@ -531,3 +531,42 @@ export async function addBreak(start: string, end: string, reason: string): Prom
   );
 }
 
+
+// ─── Data management ─────────────────────────────────────────────────────────
+
+/**
+ * Every log with its sets, oldest first, for the JSON export.
+ * shortcut: one query per log; fine for a few thousand logs, switch to a single join if exports get slow.
+ * @returns All logs in LogDetail shape
+ */
+export async function getAllLogsForExport(): Promise<LogDetail[]> {
+  const rows = await db.getAllAsync<{ date: string }>('SELECT date FROM workout_logs ORDER BY date');
+  const logs = await Promise.all(rows.map((r) => getLogDetail(r.date)));
+  return logs.filter((l): l is LogDetail => l !== null);
+}
+
+/**
+ * Deletes every workout log, its sets, and the explained breaks. Templates and schedule stay.
+ */
+export async function clearLogs(): Promise<void> {
+  // Atomic: half-cleared history would leave sets without logs or breaks explaining nothing.
+  await db.withExclusiveTransactionAsync(async (txn) => {
+    await txn.execAsync('DELETE FROM log_sets; DELETE FROM workout_logs; DELETE FROM breaks;');
+  });
+}
+
+/**
+ * Deletes all data and puts every setting back to its default. Media files are deleted separately (lib/media.ts).
+ */
+export async function clearEverything(): Promise<void> {
+  // Atomic: a crash halfway must not leave, say, a schedule pointing at deleted workouts or settings missing.
+  await db.withExclusiveTransactionAsync(async (txn) => {
+    await txn.execAsync(`
+      DELETE FROM log_sets; DELETE FROM workout_logs; DELETE FROM breaks;
+      DELETE FROM schedule_entries; DELETE FROM template_exercises; DELETE FROM workout_templates;
+      DELETE FROM settings;`);
+    for (const [key, value] of Object.entries(DEFAULT_SETTINGS)) {
+      await txn.runAsync('INSERT INTO settings (key, value) VALUES (?, ?)', key, value);
+    }
+  });
+}

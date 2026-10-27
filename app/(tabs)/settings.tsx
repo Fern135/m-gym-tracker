@@ -3,8 +3,10 @@
  * @description Settings screen. Batch 1 shows the seeded values read back from
  * SQLite and lets you set rest time, sets, week start and theme; the full screen arrives in batch 8.
  */
+import { useEffect, useState } from 'react';
 import { ScrollView, View } from 'react-native';
-import { IconButton, List, SegmentedButtons, Text, useTheme } from 'react-native-paper';
+import { Button, IconButton, List, SegmentedButtons, Text, useTheme } from 'react-native-paper';
+import { allowExactAlarms, exactAlarmsAllowed } from '../../lib/notifications';
 import { formatClock } from '../../lib/workout';
 import { useAppStore } from '../../lib/store';
 import type { ThemeSetting } from '../../lib/settings';
@@ -14,6 +16,8 @@ import type { ThemeSetting } from '../../lib/settings';
  */
 export default function SettingsScreen() {
   const { colors } = useTheme();
+  const [exactOk, setExactOk] = useState<boolean | null>(null);
+  useEffect(() => { exactAlarmsAllowed().then(setExactOk); }, []);
   const { weightUnit, theme, firstDayOfWeek, restSeconds, defaultSets, setTheme, setFirstDayOfWeek, setRestSeconds, setDefaultSets } = useAppStore();
   return (
     <ScrollView style={{ backgroundColor: colors.background }} contentContainerStyle={{ padding: 16, gap: 8 }}>
@@ -34,6 +38,15 @@ export default function SettingsScreen() {
           <Stepper label={String(defaultSets)} onMinus={() => setDefaultSets(Math.max(1, defaultSets - 1))} onPlus={() => setDefaultSets(Math.min(10, defaultSets + 1))} what="sets per exercise" />
         )}
       />
+      {exactOk === false && (
+        <List.Item
+          title="Rest alarm on time"
+          description="Android may deliver the rest alert late while the phone is locked. Allow alarms to fix it."
+          descriptionNumberOfLines={3}
+          left={(p) => <List.Icon {...p} icon="alarm" />}
+          right={() => <Button onPress={() => allowExactAlarms().then(setExactOk)}>Allow</Button>}
+        />
+      )}
       <List.Subheader>Week starts on</List.Subheader>
       <SegmentedButtons
         value={String(firstDayOfWeek)}

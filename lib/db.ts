@@ -18,7 +18,10 @@ export const DEFAULT_SETTINGS = {
   theme: 'system',
   notifications_enabled: 'true',
   notification_workout_time: '08:00',
-  notification_lead_times: '["day_before","1_hour","15_min"]',
+  // evening_checkin: 9 PM "you haven't logged it" on workout days still open.
+  notification_lead_times: '["day_before","1_hour","15_min","evening_checkin"]',
+  // 'true' once the first-launch notification permission prompt was shown, so it's asked only once.
+  notification_permission_asked: '',
   first_day_of_week: '1',
   rest_seconds: '90',
   default_sets: '3',

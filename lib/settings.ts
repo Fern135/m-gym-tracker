@@ -9,7 +9,7 @@ import type { WorkoutDraft } from './workout';
 export type WeightUnit = 'lbs' | 'kg';
 export type ThemeSetting = 'system' | 'light' | 'dark';
 export type FirstDayOfWeek = 0 | 1;
-export type LeadTime = 'day_before' | '1_hour' | '30_min' | '15_min' | 'at_time';
+export type LeadTime = 'day_before' | '1_hour' | '30_min' | '15_min' | 'at_time' | 'evening_checkin';
 
 /**
  * Reads a raw setting, falling back to its default if the row is missing.
@@ -127,7 +127,7 @@ export function parseTime(value: string): { hour: number; minute: number } {
  * @returns Valid lead times only
  */
 export function parseLeadTimes(value: string): LeadTime[] {
-  const valid: LeadTime[] = ['day_before', '1_hour', '30_min', '15_min', 'at_time'];
+  const valid: LeadTime[] = ['day_before', '1_hour', '30_min', '15_min', 'at_time', 'evening_checkin'];
   try {
     const arr: unknown = JSON.parse(value);
     return Array.isArray(arr) ? valid.filter((t) => arr.includes(t)) : [];

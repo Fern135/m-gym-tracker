@@ -1,7 +1,7 @@
 /**
  * @file _layout.tsx
  * @description Root layout. Loads fonts, initializes the database and settings,
- * then provides the Paper and navigation themes to every screen.
+ * sets up notifications, then provides the Paper and navigation themes to every screen.
  */
 import { Barlow_400Regular, Barlow_500Medium } from '@expo-google-fonts/barlow';
 import { BarlowCondensed_600SemiBold, BarlowCondensed_700Bold } from '@expo-google-fonts/barlow-condensed';
@@ -13,6 +13,7 @@ import { useColorScheme, View } from 'react-native';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { PaperProvider, Text } from 'react-native-paper';
 import { initDb } from '../lib/db';
+import { setupNotifications } from '../lib/notifications';
 import { useAppStore } from '../lib/store';
 import { darkTheme, lightTheme } from '../lib/theme';
 
@@ -30,6 +31,7 @@ export default function RootLayout() {
   useEffect(() => {
     initDb()
       .then(() => useAppStore.getState().hydrate())
+      .then(() => { setupNotifications(); }) // not awaited: the app shouldn't wait on the permission prompt
       .catch((e: unknown) => setDbError(e instanceof Error ? e.message : String(e)));
   }, []);
 
@@ -44,7 +46,7 @@ export default function RootLayout() {
   if (dbError) {
     return (
       <View style={{ flex: 1, justifyContent: 'center', padding: 24, backgroundColor: paper.colors.background }}>
-        <Text style={{ color: paper.colors.onSurface }}>Ironweek couldn't open its database: {dbError}. Restart the app; if this keeps happening, reinstall it.</Text>
+        <Text style={{ color: paper.colors.onSurface }}>Ironweek couldn&apos;t open its database: {dbError}. Restart the app; if this keeps happening, reinstall it.</Text>
       </View>
     );
   }

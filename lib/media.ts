@@ -85,7 +85,7 @@ const SLOW_MS = 3000;
 /**
  * Checks whether the internet is good enough for an online video search.
  * shortcut: one tiny request with a timeout stands in for a speed test; use a real bandwidth check if users report false alarms.
- * @returns 'bad' when offline or slower than SLOW_MS, else 'ok'
+ * @returns 'bad' when there's no connection or it's slower than SLOW_MS, else 'ok'
  */
 export async function checkInternet(): Promise<'ok' | 'bad'> {
   const abort = new AbortController();

@@ -26,7 +26,16 @@
       "expo-status-bar",
       "expo-sqlite",
       "expo-sharing",
-      "expo-font"
+      "expo-font",
+      [
+        "expo-image-picker",
+        {
+          "photosPermission": "Ironweek lets you pick exercise videos from your library.",
+          "cameraPermission": "Ironweek uses the camera to record how-to videos for your exercises.",
+          "microphonePermission": "Recording a video captures sound; Ironweek plays exercise videos muted."
+        }
+      ],
+      "expo-video"
     ],
     "scheme": "ironweek",
     "experiments": {

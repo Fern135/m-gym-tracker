@@ -16,6 +16,7 @@ import { useEffect, useState } from 'react';
 import { KeyboardAvoidingView, Platform, ScrollView, StyleSheet, View } from 'react-native';
 import { ActivityIndicator, Button, Dialog, HelperText, IconButton, Portal, RadioButton, Text, TextInput, useTheme } from 'react-native-paper';
 import { LogForm } from '../../../components/LogForm';
+import { ExerciseVideo } from '../../../components/ExerciseVideo';
 import { NumberField } from '../../../components/NumberField';
 import { ReasonDialog } from '../../../components/ReasonDialog';
 import { RestTimer } from '../../../components/RestTimer';
@@ -29,7 +30,7 @@ import { formatClock, formatDuration, formatSet, setsLeftLabel, type DraftExerci
 
 const SKIP_REASONS = ['Short on time', 'Feeling unwell', 'Low energy', 'Hungry', 'Sore'];
 
-type Planned = { templateId: number | null; name: string; exercises: string[] };
+type Planned = { templateId: number | null; name: string; exercises: { name: string; video: string | null }[] };
 type Mode = 'loading' | 'intro' | 'guided' | 'review' | 'view' | 'edit' | 'done';
 type Summary = { name: string; duration: number; rest: number; sets: number };
 type Confirm = { title: string; body: string; action: string; onConfirm: () => void };
@@ -70,7 +71,7 @@ export default function LogScreen() {
       const templateId = detail ? detail.template_id : entry?.template_id ?? null;
       const template = templateId !== null ? await getTemplate(templateId) : null;
       const name = detail?.template_name ?? template?.name ?? entry?.template_name ?? null;
-      setPlanned(name ? { templateId, name, exercises: template?.exercises.map((e) => e.name) ?? [] } : null);
+      setPlanned(name ? { templateId, name, exercises: template?.exercises.map((e) => ({ name: e.name, video: e.video_path })) ?? [] } : null);
 
       if (saved?.date === date) {
         // Drafts saved before time tracking existed lack these fields.
@@ -80,7 +81,7 @@ export default function LogScreen() {
         setMode('view');
       } else {
         setMode('intro');
-        if (start === '1' && isToday && name && detail?.status !== 'skipped' && !saved) begin({ templateId, name, exercises: template?.exercises.map((e) => e.name) ?? [] });
+        if (start === '1' && isToday && name && detail?.status !== 'skipped' && !saved) begin({ templateId, name, exercises: template?.exercises.map((e) => ({ name: e.name, video: e.video_path })) ?? [] });
       }
     } catch (e) {
       setError(String(e));
@@ -96,7 +97,7 @@ export default function LogScreen() {
 
   /** Starts the guided workout, warning first if another day's workout is unfinished. */
   const begin = async (p: Planned) => {
-    const fresh: WorkoutDraft = { date, templateId: p.templateId, templateName: p.name, exercises: p.exercises.map((name) => ({ name, sets: [] })), index: 0, startedAt: Date.now(), restMs: 0 };
+    const fresh: WorkoutDraft = { date, templateId: p.templateId, templateName: p.name, exercises: p.exercises.map((e) => ({ name: e.name, video: e.video, sets: [] })), index: 0, startedAt: Date.now(), restMs: 0 };
     const other = await getWorkoutDraft();
     const go = () => { setConfirm(null); setDraft(fresh); setMode('guided'); };
     if (other && other.date !== date) {
@@ -113,7 +114,7 @@ export default function LogScreen() {
     if (planned) return begin(planned);
     // Rest day or unscheduled: use the picked template, or an empty workout.
     const t = chosen === 'empty' ? null : await getTemplate(Number(chosen));
-    begin({ templateId: t?.id ?? null, name: t?.name ?? 'Workout', exercises: t?.exercises.map((e) => e.name) ?? [] });
+    begin({ templateId: t?.id ?? null, name: t?.name ?? 'Workout', exercises: t?.exercises.map((e) => ({ name: e.name, video: e.video_path })) ?? [] });
   };
 
   const complete = async (exercises: DraftExercise[], name: string, templateId: number | null) => {
@@ -293,7 +294,7 @@ function Intro({ log, planned, templates, chosen, setChosen, notes, setNotes, on
 
       {planned ? (
         <Text variant="bodyLarge" style={[muted, { marginTop: 12 }]}>
-          {planned.exercises.length ? planned.exercises.join(', ') : 'No exercises in this workout yet. You can add them as you go.'}
+          {planned.exercises.length ? planned.exercises.map((e) => e.name).join(', ') : 'No exercises in this workout yet. You can add them as you go.'}
         </Text>
       ) : !onStart ? null : (
         <>
@@ -403,6 +404,7 @@ function Guided({ draft, setDraft, unit, restSeconds, targetSets, onFinish }: Gu
 
       <View style={[styles.exCard, { backgroundColor: colors.surface, borderLeftColor: plate.blue }]}>
         <Text style={[styles.name, { color: colors.onSurface }]}>{ex.name}</Text>
+        {ex.video && <ExerciseVideo key={ex.video} path={ex.video} height={190} />}
 
         {ex.sets.map((s, i) => (
           <View key={i} style={styles.doneRow}>

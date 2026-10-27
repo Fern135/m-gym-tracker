@@ -10,7 +10,7 @@ import * as SQLite from 'expo-sqlite';
 const db = SQLite.openDatabaseSync('ironweek.db');
 
 /** Bump when the schema changes and add a migration step in initDb. */
-const SCHEMA_VERSION = 3;
+const SCHEMA_VERSION = 4;
 
 /** Default settings seeded on first launch and restored by "Clear everything". */
 export const DEFAULT_SETTINGS = {
@@ -112,6 +112,15 @@ ALTER TABLE workout_logs ADD COLUMN rest_seconds INTEGER;
 `;
 
 /**
+ * v3 → v4: each exercise can have one how-to video (relative path in the
+ * document directory). Photos on workout days were dropped in favor of these.
+ */
+const MIGRATE_V4_SQL = `
+ALTER TABLE template_exercises ADD COLUMN video_path TEXT;
+DROP TABLE log_photos;
+`;
+
+/**
  * v1 → v2: adds 'missed' to the status CHECK (SQLite can't alter a CHECK, so the
  * table is rebuilt and rows copied), a one-log-per-date index, and the breaks table.
  * Order matters: build new, copy, drop old, rename new. Renaming the old table
@@ -156,7 +165,11 @@ export async function initDb(): Promise<void> {
       await txn.execAsync(SCHEMA_SQL);
       version = 2;
     }
-    if (version === 2) await txn.execAsync(MIGRATE_V3_SQL);
+    if (version === 2) {
+      await txn.execAsync(MIGRATE_V3_SQL);
+      version = 3;
+    }
+    if (version === 3) await txn.execAsync(MIGRATE_V4_SQL);
     await txn.execAsync(`PRAGMA user_version = ${SCHEMA_VERSION}`);
     for (const [key, value] of Object.entries(DEFAULT_SETTINGS)) {
       await txn.runAsync('INSERT OR IGNORE INTO settings (key, value) VALUES (?, ?)', key, value);
@@ -197,9 +210,9 @@ export async function getAllSettings(): Promise<Partial<Record<SettingKey, strin
 // ─── Workout templates ───────────────────────────────────────────────────────
 
 export type TemplateSummary = { id: number; name: string; exercise_count: number };
-export type TemplateExercise = { id: number; name: string; sort_order: number };
+export type TemplateExercise = { id: number; name: string; sort_order: number; video_path: string | null };
 export type Template = { id: number; name: string; notes: string | null; created_at: string; exercises: TemplateExercise[] };
-export type TemplateInput = { id?: number; name: string; notes: string | null; exercises: string[] };
+export type TemplateInput = { id?: number; name: string; notes: string | null; exercises: { name: string; video_path: string | null }[] };
 
 /**
  * Lists every template with how many exercises it has, alphabetically.
@@ -222,7 +235,7 @@ export async function getTemplate(id: number): Promise<Template | null> {
   const t = await db.getFirstAsync<Omit<Template, 'exercises'>>('SELECT * FROM workout_templates WHERE id = ?', id);
   if (!t) return null;
   const exercises = await db.getAllAsync<TemplateExercise>(
-    'SELECT id, name, sort_order FROM template_exercises WHERE template_id = ? ORDER BY sort_order',
+    'SELECT id, name, sort_order, video_path FROM template_exercises WHERE template_id = ? ORDER BY sort_order',
     id,
   );
   return { ...t, exercises };
@@ -248,8 +261,8 @@ export async function saveTemplate(input: TemplateInput): Promise<number> {
       );
       id = r.lastInsertRowId;
     }
-    for (const [i, name] of input.exercises.entries()) {
-      await txn.runAsync('INSERT INTO template_exercises (template_id, name, sort_order) VALUES (?, ?, ?)', id, name, i);
+    for (const [i, ex] of input.exercises.entries()) {
+      await txn.runAsync('INSERT INTO template_exercises (template_id, name, sort_order, video_path) VALUES (?, ?, ?, ?)', id, ex.name, i, ex.video_path);
     }
   });
   return id;

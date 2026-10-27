@@ -5,7 +5,12 @@
  */
 
 export type LoggedSet = { reps: number | null; weight: number | null };
-export type DraftExercise = { name: string; sets: LoggedSet[] };
+export type DraftExercise = {
+  name: string;
+  sets: LoggedSet[];
+  /** How-to video copied from the workout plan when the session started (relative path). */
+  video?: string | null;
+};
 
 /** A workout in progress. Saved after every change so a killed app can resume it. */
 export type WorkoutDraft = {

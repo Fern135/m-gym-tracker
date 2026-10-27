@@ -5,7 +5,7 @@
  */
 import { useEffect, useState } from 'react';
 import { StyleSheet, View } from 'react-native';
-import { Button, Chip, Dialog, Portal, Text, TextInput } from 'react-native-paper';
+import { Button, Chip, Dialog, HelperText, Portal, Text, TextInput } from 'react-native-paper';
 
 type Props = {
   visible: boolean;
@@ -26,10 +26,12 @@ export function ReasonDialog({ visible, title, body, presets, confirmLabel, onCo
   const [picked, setPicked] = useState<string[]>([]);
   const [other, setOther] = useState('');
   const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   // Start fresh each time it opens.
   useEffect(() => {
-    if (visible) { setPicked([]); setOther(''); setBusy(false); }
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- one reset per open; the dialog stays mounted while hidden
+    if (visible) { setPicked([]); setOther(''); setBusy(false); setError(null); }
   }, [visible]);
 
   const reason = [...picked, other.trim()].filter(Boolean).join(', ');
@@ -39,6 +41,8 @@ export function ReasonDialog({ visible, title, body, presets, confirmLabel, onCo
     setBusy(true);
     try {
       await onConfirm(reason);
+    } catch (e) {
+      setError(`Couldn't save: ${e instanceof Error ? e.message : String(e)}`);
     } finally {
       setBusy(false);
     }
@@ -56,6 +60,7 @@ export function ReasonDialog({ visible, title, body, presets, confirmLabel, onCo
             ))}
           </View>
           <TextInput mode="outlined" label="Other reason" value={other} onChangeText={setOther} style={{ marginTop: 12 }} />
+          {error && <HelperText type="error">{error}</HelperText>}
         </Dialog.Content>
         <Dialog.Actions>
           <Button onPress={onDismiss}>Cancel</Button>

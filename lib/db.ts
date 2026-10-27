@@ -359,6 +359,22 @@ export async function getLogsBetween(from: string, to: string): Promise<LogSumma
   );
 }
 
+export type HistoryRow = LogSummary & { set_count: number };
+
+/**
+ * Every log for the History tab, newest first, with how many sets each has.
+ * @param status - Only this status, or null for all
+ * @returns History rows
+ */
+export async function getHistory(status: LogStatus | null): Promise<HistoryRow[]> {
+  return db.getAllAsync<HistoryRow>(
+    `SELECT l.id, l.template_id, l.template_name, l.date, l.status, l.notes, l.duration_seconds, l.rest_seconds, ${EXCUSED_SQL} AS excused,
+       (SELECT COUNT(*) FROM log_sets s WHERE s.log_id = l.id) AS set_count
+     FROM workout_logs l WHERE ? IS NULL OR l.status = ? ORDER BY l.date DESC`,
+    status, status,
+  );
+}
+
 /**
  * A template's most recent logs before a date, newest first, for the missed-in-a-row count.
  * @param templateId - Template id

@@ -73,9 +73,18 @@ export default function SettingsScreen() {
   /** Saves the changed notification settings, then reschedules. */
   const updateNotif = async (next: Notif) => {
     setNotif(next);
-    await Promise.all([setNotificationsEnabled(next.enabled), setWorkoutTime(next.time), setLeadTimes(next.leads)]);
+    try {
+      await Promise.all([setNotificationsEnabled(next.enabled), setWorkoutTime(next.time), setLeadTimes(next.leads)]);
+    } catch (e) {
+      showSaveError(e);
+      setNotif(await readNotif().catch(() => notif)); // show what's actually stored
+    }
     await rescheduleAll();
   };
+  /** Shows a failed settings save instead of dropping it silently. */
+  const showSaveError = (e: unknown) => setMessage(`Couldn't save: ${e instanceof Error ? e.message : String(e)}`);
+  /** Runs a store setter, reporting failure. */
+  const save = (p: Promise<void>) => { p.catch(showSaveError); };
   /** Moves the workout time by 15 minutes, wrapping around midnight. */
   const shiftTime = (minutes: number) => {
     if (!notif) return;
@@ -88,8 +97,12 @@ export default function SettingsScreen() {
     updateNotif({ ...notif, leads });
   };
   const askPermission = async () => {
-    if (perm?.canAskAgain) await requestPermission();
-    else await Linking.openSettings();
+    try {
+      if (perm?.canAskAgain) await requestPermission();
+      else await Linking.openSettings();
+    } catch (e) {
+      setMessage(`Couldn't open settings: ${e instanceof Error ? e.message : String(e)}`);
+    }
     loadPerms();
     rescheduleAll();
   };
@@ -155,14 +168,14 @@ export default function SettingsScreen() {
             <Text variant="labelLarge">Weight unit</Text>
             <SegmentedButtons
               value={weightUnit}
-              onValueChange={(v) => setWeightUnit(v === 'kg' ? 'kg' : 'lbs')}
+              onValueChange={(v) => save(setWeightUnit(v === 'kg' ? 'kg' : 'lbs'))}
               buttons={[{ value: 'lbs', label: 'Pounds (lbs)' }, { value: 'kg', label: 'Kilograms (kg)' }]}
             />
             <HelperText type="info" style={{ paddingHorizontal: 0 }}>Changes the label only. Weights you already logged keep their numbers.</HelperText>
             <Text variant="labelLarge">Week starts on</Text>
             <SegmentedButtons
               value={String(firstDayOfWeek)}
-              onValueChange={(v) => setFirstDayOfWeek(v === '0' ? 0 : 1)}
+              onValueChange={(v) => save(setFirstDayOfWeek(v === '0' ? 0 : 1))}
               buttons={[{ value: '1', label: 'Monday' }, { value: '0', label: 'Sunday' }]}
             />
           </View>
@@ -170,13 +183,13 @@ export default function SettingsScreen() {
             title="Rest time"
             description="Length of the rest timer between sets"
             left={(p) => <List.Icon {...p} icon="timer-outline" />}
-            right={() => <Stepper label={formatClock(restSeconds)} onMinus={() => setRestSeconds(Math.max(15, restSeconds - 15))} onPlus={() => setRestSeconds(Math.min(600, restSeconds + 15))} what="rest time" />}
+            right={() => <Stepper label={formatClock(restSeconds)} onMinus={() => save(setRestSeconds(Math.max(15, restSeconds - 15)))} onPlus={() => save(setRestSeconds(Math.min(600, restSeconds + 15)))} what="rest time" />}
           />
           <List.Item
             title="Sets per exercise"
             description="The countdown during a workout starts here"
             left={(p) => <List.Icon {...p} icon="counter" />}
-            right={() => <Stepper label={String(defaultSets)} onMinus={() => setDefaultSets(Math.max(1, defaultSets - 1))} onPlus={() => setDefaultSets(Math.min(10, defaultSets + 1))} what="sets per exercise" />}
+            right={() => <Stepper label={String(defaultSets)} onMinus={() => save(setDefaultSets(Math.max(1, defaultSets - 1)))} onPlus={() => save(setDefaultSets(Math.min(10, defaultSets + 1)))} what="sets per exercise" />}
           />
         </List.Section>
 
@@ -238,7 +251,7 @@ export default function SettingsScreen() {
           <View style={{ paddingHorizontal: 16 }}>
             <SegmentedButtons
               value={theme}
-              onValueChange={(v) => setTheme(v as ThemeSetting)}
+              onValueChange={(v) => save(setTheme(v as ThemeSetting))}
               buttons={[
                 { value: 'system', label: 'System', icon: 'theme-light-dark' },
                 { value: 'light', label: 'Light', icon: 'white-balance-sunny' },

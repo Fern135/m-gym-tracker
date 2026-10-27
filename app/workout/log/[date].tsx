@@ -75,20 +75,20 @@ export default function LogScreen() {
 
       if (saved?.date === date) {
         // Drafts saved before time tracking existed lack these fields.
+        // eslint-disable-next-line react-hooks/purity -- runs inside the async load, not during render
         setDraft({ ...saved, startedAt: saved.startedAt ?? Date.now(), restMs: saved.restMs ?? 0 });
         setMode('guided');
       } else if (detail?.status === 'completed') {
         setMode('view');
       } else {
         setMode('intro');
-        if (start === '1' && isToday && name && detail?.status !== 'skipped' && !saved) begin({ templateId, name, exercises: template?.exercises.map((e) => ({ name: e.name, video: e.video_path })) ?? [] });
+        if (start === '1' && isToday && name && detail?.status !== 'skipped' && !saved) await begin({ templateId, name, exercises: template?.exercises.map((e) => ({ name: e.name, video: e.video_path })) ?? [] });
       }
     } catch (e) {
       setError(String(e));
       setMode('intro');
     }
   };
-  useEffect(() => { load(); }, [date]);
 
   // Save the workout in progress on every change.
   useEffect(() => {
@@ -110,11 +110,19 @@ export default function LogScreen() {
     } else go();
   };
 
+  // Declared after begin, which load calls. Reloads only when the date changes; load sets state only after awaiting the database.
+  // eslint-disable-next-line react-hooks/set-state-in-effect, react-hooks/exhaustive-deps
+  useEffect(() => { load(); }, [date]);
+
   const startFromIntro = async () => {
-    if (planned) return begin(planned);
-    // Rest day or unscheduled: use the picked template, or an empty workout.
-    const t = chosen === 'empty' ? null : await getTemplate(Number(chosen));
-    begin({ templateId: t?.id ?? null, name: t?.name ?? 'Workout', exercises: t?.exercises.map((e) => ({ name: e.name, video: e.video_path })) ?? [] });
+    try {
+      if (planned) return await begin(planned);
+      // Rest day or unscheduled: use the picked template, or an empty workout.
+      const t = chosen === 'empty' ? null : await getTemplate(Number(chosen));
+      await begin({ templateId: t?.id ?? null, name: t?.name ?? 'Workout', exercises: t?.exercises.map((e) => ({ name: e.name, video: e.video_path })) ?? [] });
+    } catch (e) {
+      setError(`Couldn't start the workout: ${String(e)}`);
+    }
   };
 
   const complete = async (exercises: DraftExercise[], name: string, templateId: number | null) => {
@@ -144,7 +152,16 @@ export default function LogScreen() {
       title: 'Discard this workout?',
       body: 'The sets you logged in this session will be lost.',
       action: 'Discard',
-      onConfirm: async () => { setConfirm(null); await setWorkoutDraft(null); setDraft(null); router.back(); },
+      onConfirm: async () => {
+        setConfirm(null);
+        try {
+          await setWorkoutDraft(null);
+          setDraft(null);
+          router.back();
+        } catch (e) {
+          setError(`Couldn't discard: ${String(e)}`);
+        }
+      },
     });
 
   const skip = async (reason: string) => {

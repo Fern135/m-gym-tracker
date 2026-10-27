@@ -31,22 +31,22 @@ const base = configureFonts({ config: { fontFamily: FONT.body } });
  * @param fontFamily - Font file name
  * @returns The variant with the new family
  */
-const use = (variant: (typeof base)['bodyLarge'], fontFamily: string) => ({ ...variant, fontFamily, fontWeight: '400' as const });
+const withFont = (variant: (typeof base)['bodyLarge'], fontFamily: string) => ({ ...variant, fontFamily, fontWeight: '400' as const });
 
 const fonts = {
   ...base,
-  displayLarge: use(base.displayLarge, FONT.display),
-  displayMedium: use(base.displayMedium, FONT.display),
-  displaySmall: use(base.displaySmall, FONT.display),
-  headlineLarge: use(base.headlineLarge, FONT.display),
-  headlineMedium: use(base.headlineMedium, FONT.display),
-  headlineSmall: use(base.headlineSmall, FONT.display),
-  titleLarge: use(base.titleLarge, FONT.title),
-  titleMedium: use(base.titleMedium, FONT.medium),
-  titleSmall: use(base.titleSmall, FONT.medium),
-  labelLarge: use(base.labelLarge, FONT.medium),
-  labelMedium: use(base.labelMedium, FONT.medium),
-  labelSmall: use(base.labelSmall, FONT.medium),
+  displayLarge: withFont(base.displayLarge, FONT.display),
+  displayMedium: withFont(base.displayMedium, FONT.display),
+  displaySmall: withFont(base.displaySmall, FONT.display),
+  headlineLarge: withFont(base.headlineLarge, FONT.display),
+  headlineMedium: withFont(base.headlineMedium, FONT.display),
+  headlineSmall: withFont(base.headlineSmall, FONT.display),
+  titleLarge: withFont(base.titleLarge, FONT.title),
+  titleMedium: withFont(base.titleMedium, FONT.medium),
+  titleSmall: withFont(base.titleSmall, FONT.medium),
+  labelLarge: withFont(base.labelLarge, FONT.medium),
+  labelMedium: withFont(base.labelMedium, FONT.medium),
+  labelSmall: withFont(base.labelSmall, FONT.medium),
 };
 
 export const lightTheme: MD3Theme = {

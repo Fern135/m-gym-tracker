@@ -23,7 +23,7 @@ type Props = {
 export function EmptyState({ icon, title, body, children }: Props) {
   const { colors } = useTheme();
   return (
-    <View style={styles.wrap}>
+    <View style={[styles.wrap, { backgroundColor: colors.background }]}>
       <MaterialCommunityIcons name={icon} size={56} color={colors.outline} />
       <Text variant="headlineSmall" style={styles.center}>{title}</Text>
       <Text variant="bodyMedium" style={[styles.center, { color: colors.onSurfaceVariant }]}>{body}</Text>

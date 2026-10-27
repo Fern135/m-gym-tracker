@@ -39,12 +39,14 @@
   },
   "scripts": {
     "start": "expo start",
-    "android": "expo start --android",
-    "ios": "expo start --ios",
+    "android": "expo run:android",
+    "ios": "expo run:ios",
     "web": "expo start --web",
     "typecheck": "tsc --noEmit",
     "test": "npx -y tsx lib/week.test.ts && npx -y tsx lib/workout.test.ts && npx -y tsx lib/reminders.test.ts",
-    "lint": "expo lint"
+    "lint": "eslint .",
+    "phone:android": "ANDROID_HOME=\"$HOME/Library/Android/sdk\" JAVA_HOME=\"/Applications/Android Studio.app/Contents/jbr/Contents/Home\" expo run:android --variant release",
+    "phone:ios": "expo run:ios --device --configuration Release"
   },
   "private": true
 }

@@ -4,7 +4,7 @@
  * (and a notification fires if the app is in the background) until you tap
  * Stop; one second later you're back on the exercise.
  */
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Animated, StyleSheet, Vibration, View } from 'react-native';
 import { Button, Portal, Text, useTheme } from 'react-native-paper';
 import { cancelRestEnd, scheduleRestEnd } from '../lib/notifications';
@@ -27,11 +27,12 @@ export function RestTimer({ seconds, onFinish }: Props) {
   const { colors } = useTheme();
   // Counting from an end time (not ticks) keeps it right after the app was backgrounded.
   const [endAt, setEndAt] = useState(() => Date.now() + seconds * 1000);
-  const [now, setNow] = useState(Date.now());
+  const [now, setNow] = useState(() => Date.now());
   const [phase, setPhase] = useState<'counting' | 'over' | 'resuming'>('counting');
-  const total = useRef(seconds * 1000);
-  const startedAt = useRef(Date.now());
-  const pulse = useRef(new Animated.Value(1)).current;
+  // Full length of this rest, for the progress bar; ±15 s changes it too.
+  const [total, setTotal] = useState(seconds * 1000);
+  const [startedAt] = useState(() => Date.now());
+  const [pulse] = useState(() => new Animated.Value(1));
 
   const remaining = (endAt - now) / 1000;
 
@@ -50,6 +51,7 @@ export function RestTimer({ seconds, onFinish }: Props) {
 
   useEffect(() => {
     if (phase !== 'counting' || remaining > 0) return;
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- reacting to the clock running out, not to props
     setPhase('over');
     Vibration.vibrate([0, 600, 400], true);
     // One pulsing element to pull attention to Stop.
@@ -61,10 +63,10 @@ export function RestTimer({ seconds, onFinish }: Props) {
 
   const adjust = (delta: number) => {
     setEndAt((e) => Math.max(Date.now() + 1000, e + delta * 1000));
-    total.current = Math.max(total.current + delta * 1000, 1000);
+    setTotal((t) => Math.max(t + delta * 1000, 1000));
   };
   const stop = () => {
-    const rested = Date.now() - startedAt.current; // the 1 s "Next set" pause isn't rest
+    const rested = Date.now() - startedAt; // the 1 s "Next set" pause isn't rest
     Vibration.cancel();
     pulse.stopAnimation();
     setPhase('resuming');
@@ -79,18 +81,18 @@ export function RestTimer({ seconds, onFinish }: Props) {
             <Text variant="titleLarge" style={{ color: colors.onSurfaceVariant }}>Rest</Text>
             <Text style={[styles.clock, { color: colors.onSurface }]} accessibilityLiveRegion="polite">{formatClock(remaining)}</Text>
             <View style={[styles.track, { backgroundColor: colors.surfaceVariant }]}>
-              <View style={[styles.bar, { backgroundColor: plate.blue, width: `${Math.max(0, Math.min(1, (remaining * 1000) / total.current)) * 100}%` }]} />
+              <View style={[styles.bar, { backgroundColor: plate.blue, width: `${Math.max(0, Math.min(1, (remaining * 1000) / total)) * 100}%` }]} />
             </View>
             <View style={styles.row}>
               <Button mode="outlined" onPress={() => adjust(-15)}>−15 s</Button>
               <Button mode="outlined" onPress={() => adjust(15)}>+15 s</Button>
             </View>
-            <Button onPress={() => onFinish(Date.now() - startedAt.current)} style={{ marginTop: 8 }}>Skip rest</Button>
+            <Button onPress={() => onFinish(Date.now() - startedAt)} style={{ marginTop: 8 }}>Skip rest</Button>
           </>
         )}
         {phase === 'over' && (
           <>
-            <Text style={[styles.over, { color: colors.onSurface }]}>Rest's over</Text>
+            <Text style={[styles.over, { color: colors.onSurface }]}>Rest&apos;s over</Text>
             <Animated.View style={{ transform: [{ scale: pulse }], alignSelf: 'stretch' }}>
               <Button mode="contained" onPress={stop} contentStyle={styles.stop} labelStyle={styles.stopLabel}>Stop</Button>
             </Animated.View>

@@ -100,6 +100,7 @@ export default function TodayScreen() {
           onOpen={() => openDay(day)}
           onStart={() => router.push({ pathname: '/workout/log/[date]', params: { date: day.date, start: '1' } })}
           onSkip={() => setSkipping(true)}
+          weekEmpty={week.every((d) => d.state === 'rest')}
         />
       </View>
 
@@ -128,17 +129,35 @@ export default function TodayScreen() {
   );
 }
 
-type HeroProps = { day: DayCard; exercises: string[]; onOpen: () => void; onStart: () => void; onSkip: () => void };
+type HeroProps = {
+  day: DayCard;
+  exercises: string[];
+  onOpen: () => void;
+  onStart: () => void;
+  onSkip: () => void;
+  /** Nothing scheduled or logged all week, e.g. on first launch: point to setup instead. */
+  weekEmpty: boolean;
+};
 
 /**
  * The big card for today: what to do and the buttons to do it.
  * @param props - Today's card, its exercises and handlers
  * @returns Card content for the current state
  */
-function HeroContent({ day, exercises, onOpen, onStart, onSkip }: HeroProps) {
+function HeroContent({ day, exercises, onOpen, onStart, onSkip, weekEmpty }: HeroProps) {
   const { colors } = useTheme();
   const muted = { color: colors.onSurfaceVariant };
 
+  if (day.state === 'rest' && weekEmpty) {
+    return (
+      <>
+        <Text style={[styles.heroName, { color: colors.onSurface }]}>Plan your week</Text>
+        <Text variant="bodyMedium" style={muted}>Nothing is scheduled this week. Create a workout, then put it on the days you train.</Text>
+        <Button mode="contained" icon="plus" onPress={() => router.push('/workout/template/new')} style={styles.cta}>Create a workout</Button>
+        <Button icon="calendar-week" onPress={() => router.push('/schedule')} style={{ alignSelf: 'flex-start', marginTop: 4 }}>Open schedule</Button>
+      </>
+    );
+  }
   if (day.state === 'rest') {
     return (
       <>

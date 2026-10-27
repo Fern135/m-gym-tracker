@@ -18,6 +18,7 @@ import { useAppStore } from '../../lib/store';
 import { FONT } from '../../lib/theme';
 import { loadToday, type TodayData } from '../../lib/today';
 import type { DayCard } from '../../lib/week';
+import { formatDuration } from '../../lib/workout';
 
 const SKIP_REASONS = ['Short on time', 'Feeling unwell', 'Low energy', 'Hungry', 'Sore'];
 const BREAK_REASONS = ['Health', "Doctor's orders", 'Injury', 'Travel', 'Busy'];
@@ -93,7 +94,13 @@ export default function TodayScreen() {
       <Text style={[styles.date, { color: colors.onSurface }]}>{format(new Date(), 'EEEE, MMMM d')}</Text>
 
       <View style={[styles.hero, { backgroundColor: colors.surface, borderLeftColor: statusColor(day, colors) }]}>
-        <HeroContent day={day} exercises={exercises} onOpen={() => openDay(day)} onSkip={() => setSkipping(true)} />
+        <HeroContent
+          day={day}
+          exercises={exercises}
+          onOpen={() => openDay(day)}
+          onStart={() => router.push({ pathname: '/workout/log/[date]', params: { date: day.date, start: '1' } })}
+          onSkip={() => setSkipping(true)}
+        />
       </View>
 
       <Text variant="titleLarge" style={styles.weekTitle}>This week</Text>
@@ -121,14 +128,14 @@ export default function TodayScreen() {
   );
 }
 
-type HeroProps = { day: DayCard; exercises: string[]; onOpen: () => void; onSkip: () => void };
+type HeroProps = { day: DayCard; exercises: string[]; onOpen: () => void; onStart: () => void; onSkip: () => void };
 
 /**
  * The big card for today: what to do and the buttons to do it.
  * @param props - Today's card, its exercises and handlers
  * @returns Card content for the current state
  */
-function HeroContent({ day, exercises, onOpen, onSkip }: HeroProps) {
+function HeroContent({ day, exercises, onOpen, onStart, onSkip }: HeroProps) {
   const { colors } = useTheme();
   const muted = { color: colors.onSurfaceVariant };
 
@@ -145,7 +152,9 @@ function HeroContent({ day, exercises, onOpen, onSkip }: HeroProps) {
     return (
       <>
         <Text style={[styles.heroName, { color: colors.onSurface }]}>{day.name}</Text>
-        <Text variant="bodyMedium" style={muted}>Done for today.</Text>
+        <Text variant="bodyMedium" style={muted}>
+          {day.log?.duration_seconds ? `Done for today in ${formatDuration(day.log.duration_seconds)}.` : 'Done for today.'}
+        </Text>
         <Button mode="outlined" icon="eye-outline" onPress={onOpen} style={styles.cta}>View workout</Button>
       </>
     );
@@ -172,7 +181,7 @@ function HeroContent({ day, exercises, onOpen, onSkip }: HeroProps) {
       <Text style={[styles.heroName, { color: colors.onSurface }]}>{day.name}</Text>
       {warningText && <Text variant="bodyMedium" style={{ color: statusColor(day, colors), marginBottom: 4 }}>{warningText}</Text>}
       <Text variant="bodyMedium" style={muted}>{exercises.length ? exercises.join(', ') : 'No exercises yet. Add some in Workouts.'}</Text>
-      <Button mode="contained" icon="play" onPress={onOpen} style={styles.cta} contentStyle={{ paddingVertical: 6 }}>Start workout</Button>
+      <Button mode="contained" icon="play" onPress={onStart} style={styles.cta} contentStyle={{ paddingVertical: 6 }}>Start workout</Button>
       <Button onPress={onSkip} style={{ alignSelf: 'flex-start', marginTop: 4 }}>Skip today</Button>
     </>
   );

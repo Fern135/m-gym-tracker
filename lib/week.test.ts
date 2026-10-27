@@ -9,7 +9,7 @@ import { buildWeek, findMissedDays, missedWeekRuns, missStreak, weekDates } from
 // 2026-10-26 is a Monday. Upper Body Mon/Wed/Fri.
 const upper: ScheduleDay[] = [1, 3, 5].map((d) => ({ day_of_week: d, template_id: 1, template_name: 'Upper Body' }));
 const log = (date: string, status: LogSummary['status'], excused = 0): LogSummary =>
-  ({ id: 0, template_id: 1, template_name: 'Upper Body', date, status, notes: null, excused });
+  ({ id: 0, template_id: 1, template_name: 'Upper Body', date, status, notes: null, excused, duration_seconds: null, rest_seconds: null });
 
 // Week order follows first day of week.
 assert.deepEqual(weekDates('2026-10-28', 1)[0], '2026-10-26');

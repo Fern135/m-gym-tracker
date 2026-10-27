@@ -40,7 +40,7 @@
     "ios": "expo start --ios",
     "web": "expo start --web",
     "typecheck": "tsc --noEmit",
-    "test": "npx -y tsx lib/week.test.ts"
+    "test": "npx -y tsx lib/week.test.ts && npx -y tsx lib/workout.test.ts"
   },
   "private": true
 }

@@ -4,6 +4,7 @@
  * app reads and writes settings only through this file.
  */
 import { DEFAULT_SETTINGS, getSettingValue, setSettingValue, type SettingKey } from './db';
+import type { WorkoutDraft } from './workout';
 
 export type WeightUnit = 'lbs' | 'kg';
 export type ThemeSetting = 'system' | 'light' | 'dark';
@@ -70,6 +71,42 @@ export async function getTheme(): Promise<ThemeSetting> {
  */
 export async function getFirstDayOfWeek(): Promise<FirstDayOfWeek> {
   return (await getSetting('first_day_of_week')) === '0' ? 0 : 1;
+}
+
+/**
+ * @returns Rest timer length in seconds (15–600)
+ */
+export async function getRestSeconds(): Promise<number> {
+  const n = Number(await getSetting('rest_seconds'));
+  return Number.isFinite(n) ? Math.min(600, Math.max(15, n)) : 90;
+}
+
+/**
+ * @returns Target sets per exercise (1–10)
+ */
+export async function getDefaultSets(): Promise<number> {
+  const n = Number(await getSetting('default_sets'));
+  return Number.isInteger(n) ? Math.min(10, Math.max(1, n)) : 3;
+}
+
+/**
+ * @returns The workout in progress, or null if none (or the stored JSON is unreadable)
+ */
+export async function getWorkoutDraft(): Promise<WorkoutDraft | null> {
+  try {
+    const raw = await getSetting('workout_draft');
+    return raw ? (JSON.parse(raw) as WorkoutDraft) : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Saves or clears the workout in progress.
+ * @param draft - The draft, or null once it's completed or discarded
+ */
+export async function setWorkoutDraft(draft: WorkoutDraft | null): Promise<void> {
+  await setSetting('workout_draft', draft ? JSON.stringify(draft) : '');
 }
 
 /**

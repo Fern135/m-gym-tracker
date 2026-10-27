@@ -10,7 +10,7 @@ import * as SQLite from 'expo-sqlite';
 const db = SQLite.openDatabaseSync('ironweek.db');
 
 /** Bump when the schema changes and add a migration step in initDb. */
-const SCHEMA_VERSION = 2;
+const SCHEMA_VERSION = 3;
 
 /** Default settings seeded on first launch and restored by "Clear everything". */
 export const DEFAULT_SETTINGS = {
@@ -24,6 +24,8 @@ export const DEFAULT_SETTINGS = {
   default_sets: '3',
   // Last date already checked for missed workouts (YYYY-MM-DD); empty until the first check.
   missed_checked_through: '',
+  // JSON of the workout in progress (WorkoutDraft), empty when none.
+  workout_draft: '',
 } as const;
 
 export type SettingKey = keyof typeof DEFAULT_SETTINGS;
@@ -103,6 +105,12 @@ CREATE TABLE settings (
 ${BREAKS_SQL}
 `;
 
+/** v2 → v3: how long each completed workout took, and how much of it was rest. Null for older logs. */
+const MIGRATE_V3_SQL = `
+ALTER TABLE workout_logs ADD COLUMN duration_seconds INTEGER;
+ALTER TABLE workout_logs ADD COLUMN rest_seconds INTEGER;
+`;
+
 /**
  * v1 → v2: adds 'missed' to the status CHECK (SQLite can't alter a CHECK, so the
  * table is rebuilt and rows copied), a one-log-per-date index, and the breaks table.
@@ -125,7 +133,7 @@ ${BREAKS_SQL}
  */
 export async function initDb(): Promise<void> {
   const row = await db.getFirstAsync<{ user_version: number }>('PRAGMA user_version');
-  const version = row?.user_version ?? 0;
+  let version = row?.user_version ?? 0;
 
   if (version === 1) {
     // Foreign keys must be off while workout_logs is rebuilt, or dropping the old table would cascade-delete log_sets.
@@ -135,6 +143,7 @@ export async function initDb(): Promise<void> {
       await txn.execAsync(MIGRATE_V2_SQL);
       await txn.execAsync('PRAGMA user_version = 2');
     });
+    version = 2;
   }
 
   // Foreign keys are off by default in SQLite and must be enabled per connection, outside any transaction.
@@ -142,10 +151,13 @@ export async function initDb(): Promise<void> {
 
   // Atomic: a crash halfway through must not leave half a schema that the version check would then skip.
   await db.withExclusiveTransactionAsync(async (txn) => {
+    // SCHEMA_SQL is the v2 shape; later versions are applied as steps, so new and upgraded installs end up identical.
     if (version === 0) {
       await txn.execAsync(SCHEMA_SQL);
-      await txn.execAsync(`PRAGMA user_version = ${SCHEMA_VERSION}`);
+      version = 2;
     }
+    if (version === 2) await txn.execAsync(MIGRATE_V3_SQL);
+    await txn.execAsync(`PRAGMA user_version = ${SCHEMA_VERSION}`);
     for (const [key, value] of Object.entries(DEFAULT_SETTINGS)) {
       await txn.runAsync('INSERT OR IGNORE INTO settings (key, value) VALUES (?, ?)', key, value);
     }
@@ -309,6 +321,9 @@ export type LogSummary = {
   notes: string | null;
   /** 1 when a missed log falls inside an explained break. */
   excused: number;
+  /** Total workout time and the part spent resting, for completed workouts tracked with the timer. */
+  duration_seconds: number | null;
+  rest_seconds: number | null;
 };
 
 /** SQL fragment: 1 if the log's date is inside any break. */
@@ -322,7 +337,7 @@ const EXCUSED_SQL = 'EXISTS (SELECT 1 FROM breaks b WHERE l.date BETWEEN b.start
  */
 export async function getLogsBetween(from: string, to: string): Promise<LogSummary[]> {
   return db.getAllAsync<LogSummary>(
-    `SELECT l.id, l.template_id, l.template_name, l.date, l.status, l.notes, ${EXCUSED_SQL} AS excused
+    `SELECT l.id, l.template_id, l.template_name, l.date, l.status, l.notes, l.duration_seconds, l.rest_seconds, ${EXCUSED_SQL} AS excused
      FROM workout_logs l WHERE l.date BETWEEN ? AND ? ORDER BY l.date`,
     from, to,
   );
@@ -337,7 +352,7 @@ export async function getLogsBetween(from: string, to: string): Promise<LogSumma
  */
 export async function getTemplateHistory(templateId: number, before: string, limit = 20): Promise<LogSummary[]> {
   return db.getAllAsync<LogSummary>(
-    `SELECT l.id, l.template_id, l.template_name, l.date, l.status, l.notes, ${EXCUSED_SQL} AS excused
+    `SELECT l.id, l.template_id, l.template_name, l.date, l.status, l.notes, l.duration_seconds, l.rest_seconds, ${EXCUSED_SQL} AS excused
      FROM workout_logs l WHERE l.template_id = ? AND l.date < ? ORDER BY l.date DESC LIMIT ?`,
     templateId, before, limit,
   );
@@ -402,6 +417,85 @@ export async function skipWorkout(input: { template_id: number | null; template_
      ON CONFLICT(date) DO UPDATE SET status = 'skipped', notes = excluded.notes`,
     input.template_id, input.template_name, input.date, input.reason, new Date().toISOString(),
   );
+}
+
+export type LogDetail = LogSummary & { exercises: { name: string; sets: { reps: number | null; weight: number | null }[] }[] };
+
+/**
+ * One date's log with its sets grouped by exercise, in the order they were logged.
+ * @param date - YYYY-MM-DD
+ * @returns The log, or null if the date has none
+ */
+export async function getLogDetail(date: string): Promise<LogDetail | null> {
+  const log = await db.getFirstAsync<LogSummary>(
+    `SELECT l.id, l.template_id, l.template_name, l.date, l.status, l.notes, l.duration_seconds, l.rest_seconds, ${EXCUSED_SQL} AS excused FROM workout_logs l WHERE l.date = ?`,
+    date,
+  );
+  if (!log) return null;
+  const rows = await db.getAllAsync<{ exercise_name: string; reps: number | null; weight: number | null }>(
+    'SELECT exercise_name, reps, weight FROM log_sets WHERE log_id = ? ORDER BY id',
+    log.id,
+  );
+  const exercises: LogDetail['exercises'] = [];
+  for (const r of rows) {
+    let ex = exercises.find((e) => e.name === r.exercise_name);
+    if (!ex) exercises.push((ex = { name: r.exercise_name, sets: [] }));
+    ex.sets.push({ reps: r.reps, weight: r.weight });
+  }
+  return { ...log, exercises };
+}
+
+export type CompletedLogInput = {
+  date: string;
+  template_id: number | null;
+  template_name: string;
+  notes: string | null;
+  exercises: { name: string; sets: { reps: number | null; weight: number | null }[] }[];
+  /** Omit when editing; the original times are kept. */
+  duration_seconds?: number;
+  rest_seconds?: number;
+};
+
+/**
+ * Saves a workout as completed with all its sets. Replaces whatever was logged
+ * for that date (a skipped or missed day becomes completed; editing rewrites the sets).
+ * Workout and exercise names are copied here, so later template edits never change this log.
+ * @param input - The finished workout
+ */
+export async function saveCompletedLog(input: CompletedLogInput): Promise<void> {
+  // Atomic: the log row and its sets must land together, or a crash would leave a completed workout with missing sets.
+  await db.withExclusiveTransactionAsync(async (txn) => {
+    await txn.runAsync(
+      `INSERT INTO workout_logs (template_id, template_name, date, status, notes, duration_seconds, rest_seconds, created_at)
+       VALUES (?, ?, ?, 'completed', ?, ?, ?, ?)
+       ON CONFLICT(date) DO UPDATE SET status = 'completed', template_id = excluded.template_id, template_name = excluded.template_name,
+         notes = excluded.notes,
+         duration_seconds = COALESCE(excluded.duration_seconds, duration_seconds),
+         rest_seconds = COALESCE(excluded.rest_seconds, rest_seconds)`,
+      input.template_id, input.template_name, input.date, input.notes,
+      input.duration_seconds ?? null, input.rest_seconds ?? null, new Date().toISOString(),
+    );
+    const row = await txn.getFirstAsync<{ id: number }>('SELECT id FROM workout_logs WHERE date = ?', input.date);
+    if (!row) throw new Error('Workout log was not saved');
+    await txn.runAsync('DELETE FROM log_sets WHERE log_id = ?', row.id);
+    for (const ex of input.exercises) {
+      for (const [i, set] of ex.sets.entries()) {
+        await txn.runAsync(
+          'INSERT INTO log_sets (log_id, exercise_name, set_number, reps, weight) VALUES (?, ?, ?, ?, ?)',
+          row.id, ex.name, i + 1, set.reps, set.weight,
+        );
+      }
+    }
+  });
+}
+
+/**
+ * Updates a log's notes (e.g. the reason on a skipped workout).
+ * @param id - Log id
+ * @param notes - New notes, or null to clear
+ */
+export async function updateLogNotes(id: number, notes: string | null): Promise<void> {
+  await db.runAsync('UPDATE workout_logs SET notes = ? WHERE id = ?', notes, id);
 }
 
 // ─── Breaks ──────────────────────────────────────────────────────────────────

@@ -2,11 +2,6 @@
 
 Ironweek is a personal workout tracker for your phone that works completely offline: there's no account and no internet needed, and everything stays on your device. You create workouts (like "Upper Body" with its list of exercises) and put them on the days of the week you want to train. The app then shows what's on today and how your week is going, marking each day as done, skipped, missed or a rest day. When you start a workout, it walks you through each exercise one set at a time. You record your reps and weight, a rest timer counts down between sets, and the app tracks how long the session took. You can attach a short how-to video to any exercise, and if you skip a workout you can note why. Reminders on workout days help you stay on track, and the History tab shows everything you've done. Settings let you choose pounds or kilograms, a light or dark theme, and when reminders arrive, and you can export your workout history as a backup file.
 
-A personal, offline workout tracker for iOS and Android, built with Expo.
-Plan a weekly schedule, follow a guided workout with a rest timer, and get local
-reminders on workout days. Everything is stored on the phone: no account, no server,
-and no internet needed (except the optional "Search online" for exercise videos).
-
 - **Today**: today's workout, this week at a glance, missed-workout warnings
 - **History**: every completed, skipped and missed workout
 - **Workouts**: templates with exercises and an optional how-to video per exercise

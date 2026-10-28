@@ -14,7 +14,7 @@ import { LinearTransition } from 'react-native-reanimated';
 import ReorderableList, { reorderItems, useReorderableDrag } from 'react-native-reorderable-list';
 import { EmptyState } from '../../../components/EmptyState';
 import { ExerciseVideo } from '../../../components/ExerciseVideo';
-import { deleteTemplate, getScheduledDaysForTemplate, getTemplate, saveTemplate } from '../../../lib/db';
+import { deleteTemplate, DuplicateNameError, getScheduledDaysForTemplate, getTemplate, saveTemplate } from '../../../lib/db';
 import { DAY_NAMES } from '../../../lib/days';
 import { checkInternet, deleteMediaFile, importVideo, MAX_VIDEO_SECONDS, pickVideo } from '../../../lib/media';
 import { rescheduleAll } from '../../../lib/notifications';
@@ -36,7 +36,7 @@ export default function TemplateEditor() {
   const [notes, setNotes] = useState('');
   const [rows, setRows] = useState<Row[]>([]);
   const [draft, setDraft] = useState('');
-  const [nameError, setNameError] = useState(false);
+  const [nameError, setNameError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [deleteDays, setDeleteDays] = useState<number[] | null>(null);
@@ -122,7 +122,7 @@ export default function TemplateEditor() {
 
   const save = async () => {
     const trimmed = name.trim();
-    if (!trimmed) return setNameError(true);
+    if (!trimmed) return setNameError('Give this workout a name.');
     setSaving(true);
     try {
       const exercises = rows.filter((r) => r.name.trim()).map((r) => ({ name: r.name.trim(), video_path: r.video }));
@@ -133,7 +133,8 @@ export default function TemplateEditor() {
       await rescheduleAll(); // notification text includes the workout name
       router.back();
     } catch (e) {
-      setError(String(e));
+      if (e instanceof DuplicateNameError) setNameError(e.message);
+      else setError(String(e));
       setSaving(false);
     }
   };
@@ -197,12 +198,12 @@ export default function TemplateEditor() {
             <TextInput
               label="Workout name"
               value={name}
-              onChangeText={(t) => { setName(t); setNameError(false); }}
-              error={nameError}
+              onChangeText={(t) => { setName(t); setNameError(null); }}
+              error={!!nameError}
               autoFocus={id === undefined}
               placeholder="Upper Body"
             />
-            <HelperText type="error" visible={nameError}>Give this workout a name.</HelperText>
+            <HelperText type="error" visible={!!nameError}>{nameError}</HelperText>
             <TextInput label="Notes (optional)" value={notes} onChangeText={setNotes} multiline />
             <List.Subheader style={styles.sub}>Exercises</List.Subheader>
           </View>

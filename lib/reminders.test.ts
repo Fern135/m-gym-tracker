@@ -26,7 +26,8 @@ assert.equal(r2[0].id, 'workout-2026-11-02-15_min');
 const r3 = planReminders({ ...base, now: new Date(2026, 10, 2, 10), leadTimes: ['day_before', 'evening_checkin'], loggedDates: new Set(['2026-11-02']) });
 assert.equal(r3[0].id, 'workout-2026-11-04-day_before');
 assert.deepEqual(r3[0].at, new Date(2026, 10, 3, 20));
-assert.equal(r3[0].body, 'Upper Body tomorrow — get ready');
+assert.equal(r3[0].title, 'Upper Body');
+assert.equal(r3[0].body, 'Tomorrow at 8:00 AM');
 assert.equal(r3[1].id, 'workout-2026-11-04-evening_checkin');
 assert.deepEqual(r3[1].at, new Date(2026, 10, 4, 21));
 

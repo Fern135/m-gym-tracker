@@ -25,6 +25,9 @@ export const DEFAULT_SETTINGS = {
   first_day_of_week: '1',
   rest_seconds: '90',
   default_sets: '3',
+  rest_sound: 'classic',
+  // Sound for the evening-before reminder only; the others use the phone's default.
+  reminder_sound: 'chime',
   // Last date already checked for missed workouts (YYYY-MM-DD); empty until the first check.
   missed_checked_through: '',
   // JSON of the workout in progress (WorkoutDraft), empty when none.
@@ -244,16 +247,23 @@ export async function getTemplate(id: number): Promise<Template | null> {
   return { ...t, exercises };
 }
 
+/** Thrown by saveTemplate when another workout already has that name. */
+export class DuplicateNameError extends Error {}
+
 /**
  * Creates or updates a template and replaces its exercise list.
  * Past logs are unaffected: they store their own copies of names.
  * @param input - Template fields; include id to update, omit to create
  * @returns The template id
+ * @throws DuplicateNameError if another workout has the same name, ignoring case
  */
 export async function saveTemplate(input: TemplateInput): Promise<number> {
   let id = input.id ?? 0;
   // Atomic: the template row and its exercise list must never be saved half-way.
   await db.withExclusiveTransactionAsync(async (txn) => {
+    // Checked here rather than with a UNIQUE index, so databases that already have duplicates still open.
+    const taken = await txn.getFirstAsync('SELECT 1 FROM workout_templates WHERE name = ? COLLATE NOCASE AND id != ?', input.name, id);
+    if (taken) throw new DuplicateNameError(`You already have a workout called ${input.name}.`);
     if (input.id) {
       await txn.runAsync('UPDATE workout_templates SET name = ?, notes = ? WHERE id = ?', input.name, input.notes, input.id);
       await txn.runAsync('DELETE FROM template_exercises WHERE template_id = ?', input.id);

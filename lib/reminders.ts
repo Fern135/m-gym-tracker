@@ -4,7 +4,7 @@
  * schedule, when, and what they say. No Expo or database access, so it can be
  * tested directly (see reminders.test.ts). lib/notifications.ts schedules the result.
  */
-import { addDays, set, startOfDay, subMinutes } from 'date-fns';
+import { addDays, format, set, startOfDay, subMinutes } from 'date-fns';
 import type { ScheduleDay } from './db';
 import type { LeadTime } from './settings';
 import { toDateStr } from './week';
@@ -65,7 +65,8 @@ export function planReminders({ now, schedule, leadTimes, workoutTime, loggedDat
       if (at <= now) continue;
 
       const id = `workout-${date}-${lead}`;
-      if (lead === 'day_before') out.push({ id, at, title: 'Workout tomorrow', body: `${name} tomorrow${missed || ' — get ready'}` });
+      // Worded like a calendar event: the workout as the title, when it is as the body.
+      if (lead === 'day_before') out.push({ id, at, title: name, body: `Tomorrow at ${format(set(day, { hours: workoutTime.hour, minutes: workoutTime.minute }), 'h:mm a')}${missed}` });
       else if (lead === 'evening_checkin') out.push({ id, at, title: 'Not logged yet', body: `You haven't logged ${name} today.` });
       else out.push({ id, at, title: 'Workout day 💪', body: missed ? `${name} today${missed}` : `${name} is scheduled for today` });
     }

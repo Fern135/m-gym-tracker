@@ -1,22 +1,25 @@
 /**
  * @file settings.tsx
  * @description All app settings: workout (unit, week start, rest, sets),
- * notifications (master switch, workout time, which reminders, permission help),
+ * alarm and reminder sounds (with a preview), notifications (master switch,
+ * workout time, which reminders, permission help),
  * appearance, and data (export, clear logs, clear everything).
  * Every notification change reschedules the reminders right away.
  */
 import { format, set } from 'date-fns';
+import { useAudioPlayer } from 'expo-audio';
 import { useCallback, useEffect, useState } from 'react';
 import { AppState, Linking, Platform, ScrollView, View } from 'react-native';
-import { Button, Checkbox, Dialog, HelperText, IconButton, List, Portal, SegmentedButtons, Snackbar, Surface, Switch, Text, useTheme } from 'react-native-paper';
+import { Button, Checkbox, Dialog, HelperText, IconButton, List, Menu, Portal, SegmentedButtons, Snackbar, Surface, Switch, Text, useTheme } from 'react-native-paper';
 import { clearEverything, clearLogs } from '../../lib/db';
 import { exportLogs } from '../../lib/export';
 import { deleteAllMedia } from '../../lib/media';
 import { allowExactAlarms, exactAlarmsAllowed, getPermission, requestPermission, rescheduleAll } from '../../lib/notifications';
 import {
-  getLeadTimes, getNotificationsEnabled, getWorkoutTime, setLeadTimes, setNotificationsEnabled, setWorkoutDraft, setWorkoutTime,
-  type LeadTime, type ThemeSetting,
+  getLeadTimes, getNotificationsEnabled, getReminderSound, getRestSound, getWorkoutTime, setLeadTimes, setNotificationsEnabled, setSetting,
+  setWorkoutDraft, setWorkoutTime, type LeadTime, type ThemeSetting,
 } from '../../lib/settings';
+import { REMINDER_SOUNDS, REST_SOUNDS, type ReminderSound, type RestSound, type SoundOption } from '../../lib/sounds';
 import { useAppStore } from '../../lib/store';
 import { formatClock } from '../../lib/workout';
 
@@ -54,6 +57,8 @@ export default function SettingsScreen() {
   const [confirm, setConfirm] = useState<Confirm | null>(null);
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState('');
+  const [sounds, setSounds] = useState<{ rest: RestSound; reminder: ReminderSound } | null>(null);
+  const preview = useAudioPlayer(null);
 
   /** Permissions can change in the device's Settings app, so re-check whenever the app comes back. */
   const loadPerms = useCallback(() => {
@@ -63,6 +68,7 @@ export default function SettingsScreen() {
 
   useEffect(() => {
     readNotif().then(setNotif);
+    Promise.all([getRestSound(), getReminderSound()]).then(([rest, reminder]) => setSounds({ rest, reminder }));
     loadPerms();
     const sub = AppState.addEventListener('change', (s) => {
       if (s === 'active') { loadPerms(); rescheduleAll(); } // permission may have just been granted
@@ -85,6 +91,24 @@ export default function SettingsScreen() {
   const showSaveError = (e: unknown) => setMessage(`Couldn't save: ${e instanceof Error ? e.message : String(e)}`);
   /** Runs a store setter, reporting failure. */
   const save = (p: Promise<void>) => { p.catch(showSaveError); };
+  /** Plays a sound so it can be heard before (or right after) picking it. */
+  const playPreview = (source: number | null) => {
+    if (source === null) return;
+    preview.replace(source);
+    preview.play();
+  };
+  const pickRestSound = (o: SoundOption<RestSound>) => {
+    if (!sounds) return;
+    setSounds({ ...sounds, rest: o.value });
+    playPreview(o.source);
+    save(setSetting('rest_sound', o.value)); // read when the next rest starts
+  };
+  const pickReminderSound = (o: SoundOption<ReminderSound>) => {
+    if (!sounds) return;
+    setSounds({ ...sounds, reminder: o.value });
+    playPreview(o.source);
+    setSetting('reminder_sound', o.value).then(() => rescheduleAll(), showSaveError); // scheduled reminders carry the old sound
+  };
   /** Moves the workout time by 15 minutes, wrapping around midnight. */
   const shiftTime = (minutes: number) => {
     if (!notif) return;
@@ -185,6 +209,14 @@ export default function SettingsScreen() {
             left={(p) => <List.Icon {...p} icon="timer-outline" />}
             right={() => <Stepper label={formatClock(restSeconds)} onMinus={() => save(setRestSeconds(Math.max(15, restSeconds - 15)))} onPlus={() => save(setRestSeconds(Math.min(600, restSeconds + 15)))} what="rest time" />}
           />
+          <SoundPicker
+            title="Rest alarm sound"
+            icon="alarm"
+            value={sounds?.rest}
+            options={REST_SOUNDS}
+            onPick={pickRestSound}
+            onPreview={playPreview}
+          />
           <List.Item
             title="Sets per exercise"
             description="The countdown during a workout starts here"
@@ -235,6 +267,15 @@ export default function SettingsScreen() {
               labelStyle={{ textAlign: 'left' }}
             />
           ))}
+          <SoundPicker
+            title="Evening-before sound"
+            icon="calendar-clock"
+            value={sounds?.reminder}
+            options={REMINDER_SOUNDS}
+            onPick={pickReminderSound}
+            onPreview={playPreview}
+            disabled={off || !notif?.leads.includes('day_before')}
+          />
           {Platform.OS === 'android' && exactOk === false && (
             <List.Item
               title="Rest alarm on time"
@@ -306,6 +347,55 @@ export default function SettingsScreen() {
       </Portal>
       <Snackbar visible={!!message} onDismiss={() => setMessage('')} duration={3000}>{message}</Snackbar>
     </View>
+  );
+}
+
+/**
+ * Dropdown for a sound setting. Picking one, or the play button, previews it.
+ * @param props - Row title and icon, current value, the choices, and handlers
+ * @returns The row with its menu
+ */
+function SoundPicker<T extends string>({ title, icon, value, options, onPick, onPreview, disabled }: {
+  title: string; icon: string; value: T | undefined; options: SoundOption<T>[];
+  onPick: (o: SoundOption<T>) => void; onPreview: (source: number | null) => void; disabled?: boolean;
+}) {
+  const { colors } = useTheme();
+  const [open, setOpen] = useState(false);
+  const current = options.find((o) => o.value === value);
+  return (
+    <Menu
+      visible={open}
+      onDismiss={() => setOpen(false)}
+      anchorPosition="bottom"
+      anchor={
+        <List.Item
+          title={title}
+          description={current?.label ?? ' '}
+          disabled={disabled || !current}
+          style={{ opacity: disabled ? 0.45 : 1 }}
+          onPress={() => setOpen(true)}
+          left={(p) => <List.Icon {...p} icon={icon} />}
+          right={() => (
+            <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+              {current?.source != null && (
+                <IconButton icon="play-circle-outline" disabled={disabled} onPress={() => onPreview(current.source)} accessibilityLabel={`Play ${current.label}`} />
+              )}
+              <List.Icon icon="menu-down" />
+            </View>
+          )}
+          accessibilityLabel={`${title}: ${current?.label ?? ''}. Tap to change.`}
+        />
+      }
+    >
+      {options.map((o) => (
+        <Menu.Item
+          key={o.value}
+          title={o.label}
+          titleStyle={o.value === value ? { color: colors.primary, fontWeight: 'bold' } : undefined}
+          onPress={() => { setOpen(false); onPick(o); }}
+        />
+      ))}
+    </Menu>
   );
 }
 

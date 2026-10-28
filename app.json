@@ -2,7 +2,7 @@
   "expo": {
     "name": "Ironweek",
     "slug": "ironweek",
-    "version": "1.0.0",
+    "version": "1.0.1",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "automatic",
@@ -42,7 +42,23 @@
         }
       ],
       "expo-video",
-      "expo-notifications"
+      [
+        "expo-notifications",
+        {
+          "sounds": [
+            "./assets/sounds/rest_classic.wav",
+            "./assets/sounds/rest_digital.wav",
+            "./assets/sounds/rest_rising.wav",
+            "./assets/sounds/rest_bell.wav",
+            "./assets/sounds/reminder_chime.wav",
+            "./assets/sounds/reminder_marimba.wav"
+          ]
+        }
+      ],
+      [
+        "expo-audio",
+        { "microphonePermission": false, "enableBackgroundPlayback": false }
+      ]
     ],
     "scheme": "ironweek",
     "experiments": {

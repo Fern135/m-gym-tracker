@@ -4,6 +4,7 @@
  * app reads and writes settings only through this file.
  */
 import { DEFAULT_SETTINGS, getSettingValue, setSettingValue, type SettingKey } from './db';
+import { REMINDER_SOUNDS, REST_SOUNDS, type ReminderSound, type RestSound } from './sounds';
 import type { WorkoutDraft } from './workout';
 
 export type WeightUnit = 'lbs' | 'kg';
@@ -100,6 +101,22 @@ export async function getFirstDayOfWeek(): Promise<FirstDayOfWeek> {
 export async function getRestSeconds(): Promise<number> {
   const n = Number(await getSetting('rest_seconds'));
   return Number.isFinite(n) ? Math.min(600, Math.max(15, n)) : 90;
+}
+
+/**
+ * @returns The rest alarm sound, or the default if the stored one is unknown
+ */
+export async function getRestSound(): Promise<RestSound> {
+  const v = await getSetting('rest_sound');
+  return REST_SOUNDS.find((s) => s.value === v)?.value ?? 'classic';
+}
+
+/**
+ * @returns The evening-before reminder sound, or the default if the stored one is unknown
+ */
+export async function getReminderSound(): Promise<ReminderSound> {
+  const v = await getSetting('reminder_sound');
+  return REMINDER_SOUNDS.find((s) => s.value === v)?.value ?? 'chime';
 }
 
 /**

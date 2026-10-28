@@ -9,7 +9,8 @@
 // only need these files. Switch back to the index import once Expo Go includes it or we use a dev build.
 import { cancelScheduledNotificationAsync } from 'expo-notifications/build/cancelScheduledNotificationAsync';
 import { getAllScheduledNotificationsAsync } from 'expo-notifications/build/getAllScheduledNotificationsAsync';
-import { AndroidImportance } from 'expo-notifications/build/NotificationChannelManager.types';
+import { deleteNotificationChannelAsync } from 'expo-notifications/build/deleteNotificationChannelAsync';
+import { AndroidAudioUsage, AndroidImportance } from 'expo-notifications/build/NotificationChannelManager.types';
 import {
   getExactAlarmPermissionsAsync,
   getPermissionsAsync,
@@ -22,14 +23,17 @@ import { setNotificationChannelAsync } from 'expo-notifications/build/setNotific
 import { Platform } from 'react-native';
 import { getLogsBetween, getSchedule, getTemplateHistory } from './db';
 import { LOOKAHEAD_DAYS, planReminders } from './reminders';
-import { getLeadTimes, getNotificationsEnabled, getSetting, getWorkoutTime, setSetting } from './settings';
+import { getLeadTimes, getNotificationsEnabled, getReminderSound, getRestSound, getSetting, getWorkoutTime, setSetting } from './settings';
+import { REMINDER_SOUNDS, REST_SOUNDS } from './sounds';
 import { recordMissed } from './today';
 import { missStreak, shiftDate, toDateStr } from './week';
 
 const Notifications = {
+  AndroidAudioUsage,
   AndroidImportance,
   SchedulableTriggerInputTypes,
   cancelScheduledNotificationAsync,
+  deleteNotificationChannelAsync,
   getAllScheduledNotificationsAsync,
   getExactAlarmPermissionsAsync,
   getPermissionsAsync,
@@ -39,7 +43,12 @@ const Notifications = {
   setNotificationChannelAsync,
 };
 
-const REST_CHANNEL = 'rest-timer';
+// Android channels can't change their sound once created, so there's one channel per sound.
+// Only the picked one is kept, so Android's settings list a single "Rest timer" / "Evening-before reminder".
+const restChannel = (sound: string) => `rest-alarm-${sound}`;
+const OLD_REST_CHANNELS = ['rest-timer', 'rest-timer-alarm', 'rest-alarm', ...REST_SOUNDS.map((s) => restChannel(s.value))];
+const dayBeforeChannel = (sound: string) => `day-before-${sound}`;
+const DAY_BEFORE_CHANNELS = REMINDER_SOUNDS.map((s) => dayBeforeChannel(s.value));
 const WORKOUT_CHANNEL = 'workout-reminders';
 /** Every workout reminder id starts with this (workout-{YYYY-MM-DD}-{lead}), so they can be cancelled without touching the rest timer. */
 const WORKOUT_ID_PREFIX = 'workout-';
@@ -122,8 +131,8 @@ async function reschedule(): Promise<void> {
     const today = toDateStr(now);
     // The missed-in-a-row text needs past misses recorded, even if the Today tab wasn't opened yet.
     await recordMissed(today);
-    const [schedule, leadTimes, workoutTime, logs] = await Promise.all([
-      getSchedule(), getLeadTimes(), getWorkoutTime(), getLogsBetween(today, shiftDate(today, LOOKAHEAD_DAYS)),
+    const [schedule, leadTimes, workoutTime, logs, reminderSound] = await Promise.all([
+      getSchedule(), getLeadTimes(), getWorkoutTime(), getLogsBetween(today, shiftDate(today, LOOKAHEAD_DAYS)), getReminderSound(),
     ]);
     const streaks = new Map<number, number>();
     for (const s of schedule) {
@@ -131,15 +140,24 @@ async function reschedule(): Promise<void> {
     }
 
     const reminders = planReminders({ now, schedule, leadTimes, workoutTime, loggedDates: new Set(logs.map((l) => l.date)), streaks });
+    const sound = REMINDER_SOUNDS.find((s) => s.value === reminderSound)!;
+    const dayBefore = dayBeforeChannel(sound.value);
     if (Platform.OS === 'android' && reminders.length > 0) {
       await Notifications.setNotificationChannelAsync(WORKOUT_CHANNEL, { name: 'Workout reminders', importance: Notifications.AndroidImportance.DEFAULT });
+      await Promise.all(DAY_BEFORE_CHANNELS.filter((c) => c !== dayBefore).map((c) => Notifications.deleteNotificationChannelAsync(c)));
+      await Notifications.setNotificationChannelAsync(dayBefore, {
+        name: 'Evening-before reminder',
+        importance: Notifications.AndroidImportance.DEFAULT,
+        ...(sound.file && { sound: sound.file }),
+      });
     }
     // A date trigger per occurrence (not a weekly repeat), so skipped and logged days can be left out.
     for (const r of reminders) {
+      const isDayBefore = r.id.endsWith('-day_before'); // ids are workout-{date}-{lead}
       await Notifications.scheduleNotificationAsync({
         identifier: r.id,
-        content: { title: r.title, body: r.body, sound: true },
-        trigger: { type: Notifications.SchedulableTriggerInputTypes.DATE, date: r.at, channelId: WORKOUT_CHANNEL },
+        content: { title: r.title, body: r.body, sound: (isDayBefore && sound.file) || true },
+        trigger: { type: Notifications.SchedulableTriggerInputTypes.DATE, date: r.at, channelId: isDayBefore ? dayBefore : WORKOUT_CHANNEL },
       });
     }
   } catch (e) {
@@ -183,18 +201,24 @@ export async function allowExactAlarms(): Promise<boolean> {
  */
 export async function scheduleRestEnd(at: Date): Promise<string | null> {
   try {
-    const { granted } = await Notifications.getPermissionsAsync();
+    const [{ granted }, restSound] = await Promise.all([Notifications.getPermissionsAsync(), getRestSound()]);
     if (!granted) return null;
+    const sound = REST_SOUNDS.find((s) => s.value === restSound)!;
+    const channel = restChannel(sound.value);
     if (Platform.OS === 'android') {
-      await Notifications.setNotificationChannelAsync(REST_CHANNEL, {
+      await Promise.all(OLD_REST_CHANNELS.filter((c) => c !== channel).map((c) => Notifications.deleteNotificationChannelAsync(c)));
+      // Alarm audio plays even when the phone is on vibrate, like an alarm clock.
+      await Notifications.setNotificationChannelAsync(channel, {
         name: 'Rest timer',
         importance: Notifications.AndroidImportance.HIGH,
         vibrationPattern: [0, 400, 200, 400],
+        sound: sound.file,
+        audioAttributes: { usage: Notifications.AndroidAudioUsage.ALARM },
       });
     }
     return await Notifications.scheduleNotificationAsync({
-      content: { title: "Rest's over", body: 'Time for your next set.', sound: true },
-      trigger: { type: Notifications.SchedulableTriggerInputTypes.DATE, date: at, channelId: REST_CHANNEL, delivery: 'alarmClock' },
+      content: { title: "Rest's over", body: 'Time for your next set.', sound: sound.file ?? true },
+      trigger: { type: Notifications.SchedulableTriggerInputTypes.DATE, date: at, channelId: channel, delivery: 'alarmClock' },
     });
   } catch {
     return null; // the in-app timer still works

@@ -1,6 +1,6 @@
 {
   "name": "ironweek",
-  "version": "1.0.1",
+  "version": "1.0.2",
   "main": "expo-router/entry",
   "dependencies": {
     "@expo-google-fonts/barlow": "^0.4.1",
@@ -8,6 +8,7 @@
     "@expo/vector-icons": "^15.0.2",
     "date-fns": "^4.4.0",
     "expo": "~58.0.19",
+    "expo-asset": "~58.0.19",
     "expo-audio": "~58.0.10",
     "expo-constants": "~58.0.13",
     "expo-file-system": "~58.0.11",
@@ -44,7 +45,7 @@
     "ios": "expo run:ios",
     "web": "expo start --web",
     "typecheck": "tsc --noEmit",
-    "test": "npx -y tsx lib/week.test.ts && npx -y tsx lib/workout.test.ts && npx -y tsx lib/reminders.test.ts",
+    "test": "npx -y tsx lib/week.test.ts && npx -y tsx lib/workout.test.ts && npx -y tsx lib/reminders.test.ts && npx -y tsx lib/changelog.test.ts",
     "lint": "eslint .",
     "phone:android": "ANDROID_HOME=\"$HOME/Library/Android/sdk\" JAVA_HOME=\"/Applications/Android Studio.app/Contents/jbr/Contents/Home\" expo run:android --variant release",
     "phone:ios": "expo run:ios --device --configuration Release"

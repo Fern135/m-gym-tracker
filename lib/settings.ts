@@ -120,6 +120,13 @@ export async function getReminderSound(): Promise<ReminderSound> {
 }
 
 /**
+ * @returns Whether the workout screen shows the ✓ that logs a set without resting
+ */
+export async function getQuickLog(): Promise<boolean> {
+  return (await getSetting('quick_log')) === 'true';
+}
+
+/**
  * @returns Target sets per exercise (1–10)
  */
 export async function getDefaultSets(): Promise<number> {

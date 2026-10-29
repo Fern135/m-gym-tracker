@@ -4,12 +4,19 @@
  * in-progress draft, the sets-left counter, number parsing for inputs, and time formatting.
  */
 
-export type LoggedSet = { reps: number | null; weight: number | null };
+/** A strength set (reps, weight) or a cardio entry (seconds, plus optional heart rate and calories). */
+export type LoggedSet = { reps: number | null; weight: number | null; seconds?: number | null; heartRate?: number | null; calories?: number | null };
+/** A cardio clock: counts up from startedAt, minus time paused. */
+export type CardioClock = { startedAt: number; pausedMs: number; pausedAt: number | null };
 export type DraftExercise = {
   name: string;
   sets: LoggedSet[];
   /** How-to video copied from the workout plan when the session started (relative path). */
   video?: string | null;
+  /** Timed cardio instead of sets of reps and weight. */
+  cardio?: boolean;
+  /** Cardio clock while it's running or paused; cleared once the entry is logged. */
+  clock?: CardioClock | null;
 };
 
 /** A workout in progress. Saved after every change so a killed app can resume it. */
@@ -25,6 +32,30 @@ export type WorkoutDraft = {
   /** Actual time spent on the rest timer so far, from Rest until Stop or Skip rest. */
   restMs: number;
 };
+
+/**
+ * Time on a cardio clock: since Start, minus every pause (including one in progress).
+ * @param clock - The clock
+ * @param now - Current time (ms since epoch)
+ * @returns Milliseconds, never negative
+ */
+export function clockElapsedMs(clock: CardioClock, now: number): number {
+  const pausing = clock.pausedAt ? now - clock.pausedAt : 0;
+  return Math.max(0, now - clock.startedAt - clock.pausedMs - pausing);
+}
+
+/**
+ * Formats a running clock as m:ss, or h:mm:ss from an hour up.
+ * @param secs - Seconds
+ * @returns e.g. "4:05", "1:02:09"
+ */
+export function formatStopwatch(secs: number): string {
+  const s = Math.max(0, Math.floor(secs));
+  const h = Math.floor(s / 3600);
+  const mm = Math.floor((s % 3600) / 60);
+  const ss = String(s % 60).padStart(2, '0');
+  return h ? `${h}:${String(mm).padStart(2, '0')}:${ss}` : `${mm}:${ss}`;
+}
 
 /**
  * Counter shown under the exercise: counts down to the target, then counts extra sets up.
@@ -56,9 +87,13 @@ export function parseNum(text: string, integer = false): number | null {
  * Formats a set for read-only display.
  * @param set - Reps and weight
  * @param unit - "lbs" or "kg" label (values are never converted)
- * @returns e.g. "10 reps × 135 lbs", "10 reps", "135 lbs", or "—"
+ * @returns e.g. "10 reps × 135 lbs", "10 reps", "135 lbs", "12 min · 142 bpm · 310 kcal", or "—"
  */
 export function formatSet(set: LoggedSet, unit: string): string {
+  if (set.seconds != null) {
+    return [formatDuration(set.seconds), set.heartRate != null ? `${set.heartRate} bpm` : null, set.calories != null ? `${set.calories} kcal` : null]
+      .filter(Boolean).join(' · ');
+  }
   const parts = [set.reps !== null ? `${set.reps} reps` : null, set.weight !== null ? `${set.weight} ${unit}` : null].filter(Boolean);
   return parts.length ? parts.join(' × ') : '—';
 }

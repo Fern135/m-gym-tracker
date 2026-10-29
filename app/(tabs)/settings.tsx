@@ -3,11 +3,13 @@
  * @description All app settings: workout (unit, week start, rest, sets),
  * alarm and reminder sounds (with a preview), notifications (master switch,
  * workout time, which reminders, permission help),
- * appearance, and data (export, clear logs, clear everything).
+ * appearance, about (version and What's new), and data (export, clear logs, clear everything).
  * Every notification change reschedules the reminders right away.
  */
 import { format, set } from 'date-fns';
 import { useAudioPlayer } from 'expo-audio';
+import Constants from 'expo-constants';
+import { router } from 'expo-router';
 import { useCallback, useEffect, useState } from 'react';
 import { AppState, Linking, Platform, ScrollView, View } from 'react-native';
 import { Button, Checkbox, Dialog, HelperText, IconButton, List, Menu, Portal, SegmentedButtons, Snackbar, Surface, Switch, Text, useTheme } from 'react-native-paper';
@@ -50,7 +52,7 @@ async function readNotif(): Promise<Notif> {
  */
 export default function SettingsScreen() {
   const { colors, fonts } = useTheme();
-  const { weightUnit, theme, firstDayOfWeek, restSeconds, defaultSets, setWeightUnit, setTheme, setFirstDayOfWeek, setRestSeconds, setDefaultSets, hydrate } = useAppStore();
+  const { weightUnit, theme, firstDayOfWeek, restSeconds, defaultSets, quickLog, setWeightUnit, setTheme, setFirstDayOfWeek, setRestSeconds, setDefaultSets, setQuickLog, hydrate } = useAppStore();
   const [notif, setNotif] = useState<Notif | null>(null);
   const [perm, setPerm] = useState<{ granted: boolean; canAskAgain: boolean } | null>(null);
   const [exactOk, setExactOk] = useState<boolean | null>(null);
@@ -223,6 +225,14 @@ export default function SettingsScreen() {
             left={(p) => <List.Icon {...p} icon="counter" />}
             right={() => <Stepper label={String(defaultSets)} onMinus={() => save(setDefaultSets(Math.max(1, defaultSets - 1)))} onPlus={() => save(setDefaultSets(Math.min(10, defaultSets + 1)))} what="sets per exercise" />}
           />
+          <List.Item
+            title="Log without resting button"
+            description="Shows a ✓ next to Reps and Weight that logs a set without starting the rest timer"
+            descriptionNumberOfLines={3}
+            left={(p) => <List.Icon {...p} icon="check-circle-outline" />}
+            right={() => <Switch value={quickLog} onValueChange={(on) => save(setQuickLog(on))} />}
+            onPress={() => save(setQuickLog(!quickLog))}
+          />
         </List.Section>
 
         <List.Section>
@@ -300,6 +310,17 @@ export default function SettingsScreen() {
               ]}
             />
           </View>
+        </List.Section>
+
+        <List.Section>
+          <List.Subheader>About</List.Subheader>
+          <List.Item
+            title="What's new"
+            description={`Version ${Constants.expoConfig?.version ?? ''}`}
+            left={(p) => <List.Icon {...p} icon="text-box-outline" />}
+            right={(p) => <List.Icon {...p} icon="chevron-right" />}
+            onPress={() => router.push('/changelog')}
+          />
         </List.Section>
 
         <List.Section>

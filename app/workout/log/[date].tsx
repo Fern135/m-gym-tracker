@@ -3,6 +3,7 @@
  * @description The workout screen for one date.
  * - Intro: what's planned, Start or Skip (or Log it anyway for a skipped/missed day).
  * - Guided: one exercise at a time with a sets-left counter, Rest timer and Next exercise.
+ *   A cardio item instead has a clock that counts up (Start, Pause, Finish), then heart rate and calories.
  * - Review: edit everything, add notes, Complete workout.
  * - Done: total time, active time and rest time for the session just completed.
  * - Completed: read-only view with Edit.
@@ -13,7 +14,7 @@
 import { format, parseISO } from 'date-fns';
 import { router, Stack, useLocalSearchParams } from 'expo-router';
 import { useEffect, useState } from 'react';
-import { KeyboardAvoidingView, Platform, ScrollView, StyleSheet, View } from 'react-native';
+import { KeyboardAvoidingView, ScrollView, StyleSheet, View } from 'react-native';
 import { ActivityIndicator, Button, Dialog, HelperText, IconButton, Portal, RadioButton, Text, TextInput, useTheme } from 'react-native-paper';
 import { LogForm } from '../../../components/LogForm';
 import { ExerciseVideo } from '../../../components/ExerciseVideo';
@@ -26,11 +27,11 @@ import { getWorkoutDraft, setWorkoutDraft } from '../../../lib/settings';
 import { useAppStore } from '../../../lib/store';
 import { FONT, plate } from '../../../lib/theme';
 import { toDateStr } from '../../../lib/week';
-import { formatClock, formatDuration, formatSet, setsLeftLabel, type DraftExercise, type LoggedSet, type WorkoutDraft } from '../../../lib/workout';
+import { clockElapsedMs, formatClock, formatDuration, formatSet, formatStopwatch, setsLeftLabel, type DraftExercise, type LoggedSet, type WorkoutDraft } from '../../../lib/workout';
 
 const SKIP_REASONS = ['Short on time', 'Feeling unwell', 'Low energy', 'Hungry', 'Sore'];
 
-type Planned = { templateId: number | null; name: string; exercises: { name: string; video: string | null }[] };
+type Planned = { templateId: number | null; name: string; exercises: { name: string; video: string | null; cardio: boolean }[] };
 type Mode = 'loading' | 'intro' | 'guided' | 'review' | 'view' | 'edit' | 'done';
 type Summary = { name: string; duration: number; rest: number; sets: number };
 type Confirm = { title: string; body: string; action: string; onConfirm: () => void };
@@ -42,7 +43,7 @@ type Confirm = { title: string; body: string; action: string; onConfirm: () => v
 export default function LogScreen() {
   const { date, start } = useLocalSearchParams<{ date: string; start?: string }>();
   const { colors } = useTheme();
-  const { weightUnit: unit, restSeconds, defaultSets } = useAppStore();
+  const { weightUnit: unit, restSeconds, defaultSets, quickLog } = useAppStore();
 
   const [mode, setMode] = useState<Mode>('loading');
   const [log, setLog] = useState<LogDetail | null>(null);
@@ -71,7 +72,7 @@ export default function LogScreen() {
       const templateId = detail ? detail.template_id : entry?.template_id ?? null;
       const template = templateId !== null ? await getTemplate(templateId) : null;
       const name = detail?.template_name ?? template?.name ?? entry?.template_name ?? null;
-      setPlanned(name ? { templateId, name, exercises: template?.exercises.map((e) => ({ name: e.name, video: e.video_path })) ?? [] } : null);
+      setPlanned(name ? { templateId, name, exercises: template?.exercises.map((e) => ({ name: e.name, video: e.video_path, cardio: e.kind === 'cardio' })) ?? [] } : null);
 
       if (saved?.date === date) {
         // Drafts saved before time tracking existed lack these fields.
@@ -82,7 +83,7 @@ export default function LogScreen() {
         setMode('view');
       } else {
         setMode('intro');
-        if (start === '1' && isToday && name && detail?.status !== 'skipped' && !saved) await begin({ templateId, name, exercises: template?.exercises.map((e) => ({ name: e.name, video: e.video_path })) ?? [] });
+        if (start === '1' && isToday && name && detail?.status !== 'skipped' && !saved) await begin({ templateId, name, exercises: template?.exercises.map((e) => ({ name: e.name, video: e.video_path, cardio: e.kind === 'cardio' })) ?? [] });
       }
     } catch (e) {
       setError(String(e));
@@ -97,7 +98,7 @@ export default function LogScreen() {
 
   /** Starts the guided workout, warning first if another day's workout is unfinished. */
   const begin = async (p: Planned) => {
-    const fresh: WorkoutDraft = { date, templateId: p.templateId, templateName: p.name, exercises: p.exercises.map((e) => ({ name: e.name, video: e.video, sets: [] })), index: 0, startedAt: Date.now(), restMs: 0 };
+    const fresh: WorkoutDraft = { date, templateId: p.templateId, templateName: p.name, exercises: p.exercises.map((e) => ({ name: e.name, video: e.video, cardio: e.cardio, sets: [] })), index: 0, startedAt: Date.now(), restMs: 0 };
     const other = await getWorkoutDraft();
     const go = () => { setConfirm(null); setDraft(fresh); setMode('guided'); };
     if (other && other.date !== date) {
@@ -119,7 +120,7 @@ export default function LogScreen() {
       if (planned) return await begin(planned);
       // Rest day or unscheduled: use the picked template, or an empty workout.
       const t = chosen === 'empty' ? null : await getTemplate(Number(chosen));
-      await begin({ templateId: t?.id ?? null, name: t?.name ?? 'Workout', exercises: t?.exercises.map((e) => ({ name: e.name, video: e.video_path })) ?? [] });
+      await begin({ templateId: t?.id ?? null, name: t?.name ?? 'Workout', exercises: t?.exercises.map((e) => ({ name: e.name, video: e.video_path, cardio: e.kind === 'cardio' })) ?? [] });
     } catch (e) {
       setError(`Couldn't start the workout: ${String(e)}`);
     }
@@ -190,7 +191,7 @@ export default function LogScreen() {
     );
   } else if (mode === 'guided' && draft) {
     headerRight = () => <Button onPress={() => setMode('review')}>Finish</Button>;
-    body = <Guided draft={draft} setDraft={setDraft} unit={unit} restSeconds={restSeconds} targetSets={defaultSets} onFinish={() => setMode('review')} />;
+    body = <Guided draft={draft} setDraft={setDraft} unit={unit} restSeconds={restSeconds} targetSets={defaultSets} quickLog={quickLog} onFinish={() => setMode('review')} />;
   } else if ((mode === 'review' && draft) || mode === 'edit') {
     const editing = mode === 'edit';
     const exercises = editing ? log!.exercises : draft!.exercises;
@@ -226,7 +227,7 @@ export default function LogScreen() {
           <View key={i} style={[styles.card, { backgroundColor: colors.surface }]}>
             <Text style={[styles.exName, { color: colors.onSurface }]}>{ex.name}</Text>
             {ex.sets.map((s, j) => (
-              <Text key={j} variant="bodyLarge" style={{ color: colors.onSurfaceVariant }}>Set {j + 1}   {formatSet(s, unit)}</Text>
+              <Text key={j} variant="bodyLarge" style={{ color: colors.onSurfaceVariant }}>{ex.cardio ? '' : `Set ${j + 1}   `}{formatSet(s, unit)}</Text>
             ))}
           </View>
         ))}
@@ -248,9 +249,9 @@ export default function LogScreen() {
   }
 
   return (
-    <KeyboardAvoidingView style={{ flex: 1, backgroundColor: colors.background }} behavior={Platform.OS === 'ios' ? 'padding' : undefined} keyboardVerticalOffset={100}>
+    <KeyboardAvoidingView style={{ flex: 1, backgroundColor: colors.background }} behavior="padding" keyboardVerticalOffset={100}>
       <Stack.Screen options={{ title, headerRight }} />
-      <ScrollView contentContainerStyle={styles.page} keyboardShouldPersistTaps="handled">
+      <ScrollView contentContainerStyle={styles.page} keyboardShouldPersistTaps="handled" keyboardDismissMode="on-drag">
         {error && <HelperText type="error">{error}</HelperText>}
         {body}
       </ScrollView>
@@ -311,7 +312,7 @@ function Intro({ log, planned, templates, chosen, setChosen, notes, setNotes, on
 
       {planned ? (
         <Text variant="bodyLarge" style={[muted, { marginTop: 12 }]}>
-          {planned.exercises.length ? planned.exercises.map((e) => e.name).join(', ') : 'No exercises in this workout yet. You can add them as you go.'}
+          {planned.exercises.length ? planned.exercises.map((e) => (e.cardio ? `${e.name} (cardio)` : e.name)).join(', ') : 'No exercises in this workout yet. You can add them as you go.'}
         </Text>
       ) : !onStart ? null : (
         <>
@@ -345,6 +346,8 @@ type GuidedProps = {
   unit: string;
   restSeconds: number;
   targetSets: number;
+  /** Show the ✓ that logs a set without resting (a setting). */
+  quickLog: boolean;
   onFinish: () => void;
 };
 
@@ -354,7 +357,7 @@ type GuidedProps = {
  * @param props - Draft, setters and settings
  * @returns Guided workout content
  */
-function Guided({ draft, setDraft, unit, restSeconds, targetSets, onFinish }: GuidedProps) {
+function Guided({ draft, setDraft, unit, restSeconds, targetSets, quickLog, onFinish }: GuidedProps) {
   const { colors } = useTheme();
   const [resting, setResting] = useState(false);
   const [adding, setAdding] = useState(false);
@@ -425,24 +428,28 @@ function Guided({ draft, setDraft, unit, restSeconds, targetSets, onFinish }: Gu
 
         {ex.sets.map((s, i) => (
           <View key={i} style={styles.doneRow}>
-            <Text variant="bodyLarge" style={{ color: colors.onSurfaceVariant, flex: 1 }}>Set {i + 1}   {formatSet(s, unit)}</Text>
+            <Text variant="bodyLarge" style={{ color: colors.onSurfaceVariant, flex: 1 }}>{ex.cardio ? '' : `Set ${i + 1}   `}{formatSet(s, unit)}</Text>
             <IconButton icon="close" size={18} onPress={() => setExercise((e) => ({ ...e, sets: e.sets.filter((_, k) => k !== i) }))} accessibilityLabel={`Remove set ${i + 1}`} />
           </View>
         ))}
 
+        {ex.cardio ? <CardioClock key={draft.index} ex={ex} onChange={setExercise} /> : <>
         <View style={styles.setRow}>
           <Text variant="labelLarge" style={{ width: 44 }}>Set {ex.sets.length + 1}</Text>
           <NumberField key={`r${draft.index}-${ex.sets.length}`} integer label="Reps" value={pending.reps} onChange={(reps) => setPending((p) => ({ ...p, reps }))} style={{ flex: 1 }} />
           <NumberField key={`w${draft.index}-${ex.sets.length}`} label="Weight" suffix={unit} value={pending.weight} onChange={(weight) => setPending((p) => ({ ...p, weight }))} style={{ flex: 1.3 }} />
-          <IconButton icon="check" mode="outlined" onPress={logSet} accessibilityLabel="Log set without resting" />
+          {quickLog && <IconButton icon="check" mode="outlined" onPress={logSet} accessibilityLabel="Log set without resting" />}
         </View>
 
         <Text style={[styles.counter, { color: ex.sets.length >= targetSets ? plate.green : colors.primary }]}>{setsLeftLabel(ex.sets.length, targetSets)}</Text>
+        </>}
       </View>
 
-      <Button mode="contained" icon="timer-outline" onPress={() => { logSet(); setResting(true); }} style={styles.cta} contentStyle={{ paddingVertical: 10 }} labelStyle={{ fontSize: 18 }}>
-        Rest  {formatClock(restSeconds)}
-      </Button>
+      {!ex.cardio && (
+        <Button mode="contained" icon="timer-outline" onPress={() => { logSet(); setResting(true); }} style={styles.cta} contentStyle={{ paddingVertical: 10 }} labelStyle={{ fontSize: 18 }}>
+          Rest  {formatClock(restSeconds)}
+        </Button>
+      )}
       <Button mode="outlined" icon={last ? 'flag-checkered' : 'arrow-right'} onPress={last ? onFinish : () => goTo(draft.index + 1)} style={{ marginTop: 10 }} contentStyle={{ paddingVertical: 6 }}>
         {last ? 'Finish workout' : 'Next exercise'}
       </Button>
@@ -450,6 +457,69 @@ function Guided({ draft, setDraft, unit, restSeconds, targetSets, onFinish }: Gu
 
       {resting && <RestTimer seconds={restSeconds} onFinish={(ms) => { setResting(false); setDraft({ ...draft, restMs: draft.restMs + ms }); }} />}
       {addDialog}
+    </>
+  );
+}
+
+/**
+ * The clock for a cardio item: Start, then Pause/Resume and Finish. Finish stops the
+ * clock and asks for heart rate and calories (both optional); Log it adds the entry.
+ * The clock lives in the saved draft, so it keeps the right time if the app is closed.
+ * @param props - The cardio exercise and an updater for it
+ * @returns Clock and controls
+ */
+function CardioClock({ ex, onChange }: { ex: DraftExercise; onChange: (fn: (e: DraftExercise) => DraftExercise) => void }) {
+  const { colors } = useTheme();
+  const clock = ex.clock ?? null;
+  const running = !!clock && !clock.pausedAt;
+  const [now, setNow] = useState(Date.now);
+  const [finishing, setFinishing] = useState(false);
+  const [heartRate, setHeartRate] = useState<number | null>(null);
+  const [calories, setCalories] = useState<number | null>(null);
+  useEffect(() => {
+    if (!running) return;
+    const t = setInterval(() => setNow(Date.now()), 250);
+    return () => clearInterval(t);
+  }, [running]);
+  const elapsed = clock ? clockElapsedMs(clock, clock.pausedAt ?? now) : 0;
+
+  const setClock = (c: DraftExercise['clock']) => onChange((e) => ({ ...e, clock: c }));
+  const toggle = () => {
+    const t = Date.now();
+    setNow(t);
+    if (!clock) setClock({ startedAt: t, pausedMs: 0, pausedAt: null });
+    else if (clock.pausedAt) setClock({ ...clock, pausedMs: clock.pausedMs + (t - clock.pausedAt), pausedAt: null });
+    else setClock({ ...clock, pausedAt: t });
+  };
+  const finish = () => {
+    if (running) setClock({ ...clock!, pausedAt: Date.now() });
+    setFinishing(true);
+  };
+  const log = () => {
+    onChange((e) => ({ ...e, clock: null, sets: [...e.sets, { reps: null, weight: null, seconds: Math.round(elapsed / 1000), heartRate, calories }] }));
+    setFinishing(false);
+    setHeartRate(null);
+    setCalories(null);
+  };
+
+  return (
+    <>
+      <Text style={[styles.bigTime, { color: running ? colors.onSurface : colors.onSurfaceVariant }]}>{formatStopwatch(elapsed / 1000)}</Text>
+      {finishing ? (
+        <View style={{ gap: 10 }}>
+          <NumberField integer label="Average heart rate (optional)" suffix="bpm" value={heartRate} onChange={setHeartRate} />
+          <NumberField integer label="Calories burned (optional)" suffix="kcal" value={calories} onChange={setCalories} />
+          <Button mode="contained" icon="check" onPress={log}>Log cardio</Button>
+          <Button onPress={() => setFinishing(false)}>Back to the clock</Button>
+        </View>
+      ) : (
+        <View style={{ flexDirection: 'row', gap: 10 }}>
+          <Button mode="contained" icon={running ? 'pause' : 'play'} onPress={toggle} style={{ flex: 1 }} contentStyle={{ paddingVertical: 8 }}>
+            {!clock ? 'Start' : running ? 'Pause' : 'Resume'}
+          </Button>
+          <Button mode="outlined" icon="flag-checkered" onPress={finish} disabled={!clock} style={{ flex: 1 }} contentStyle={{ paddingVertical: 8 }}>Finish</Button>
+        </View>
+      )}
     </>
   );
 }

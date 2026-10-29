@@ -2,24 +2,28 @@
  * @file template/[id].tsx
  * @description Create (id = "new") or edit a workout template: name, notes,
  * and an exercise list you can add to, rename, remove from and drag to reorder.
+ * An item can be timed cardio (Add cardio) instead of sets of reps and weight.
  * Each exercise can have one how-to video, recorded, picked, or found via a YouTube search. Video files are only deleted once the
  * change is saved; clips recorded but never saved are cleaned up on leaving.
  */
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { router, Stack, useLocalSearchParams } from 'expo-router';
 import { memo, useCallback, useEffect, useRef, useState } from 'react';
-import { KeyboardAvoidingView, Linking, Platform, Pressable, StyleSheet, View } from 'react-native';
-import { ActivityIndicator, Button, Dialog, HelperText, IconButton, List, Portal, Text, TextInput, useTheme } from 'react-native-paper';
+import { type FlatList, KeyboardAvoidingView, Linking, Pressable, StyleSheet, View } from 'react-native';
+import { ActivityIndicator, Button, Dialog, HelperText, IconButton, List, Menu, Portal, Text, TextInput, useTheme } from 'react-native-paper';
 import { LinearTransition } from 'react-native-reanimated';
 import ReorderableList, { reorderItems, useReorderableDrag } from 'react-native-reorderable-list';
 import { EmptyState } from '../../../components/EmptyState';
 import { ExerciseVideo } from '../../../components/ExerciseVideo';
-import { deleteTemplate, DuplicateNameError, getScheduledDaysForTemplate, getTemplate, saveTemplate } from '../../../lib/db';
+import { deleteTemplate, DuplicateNameError, getScheduledDaysForTemplate, getTemplate, saveTemplate, type ExerciseKind } from '../../../lib/db';
 import { DAY_NAMES } from '../../../lib/days';
 import { checkInternet, deleteMediaFile, importVideo, MAX_VIDEO_SECONDS, pickVideo } from '../../../lib/media';
 import { rescheduleAll } from '../../../lib/notifications';
 
-type Row = { key: string; name: string; video: string | null };
+type Row = { key: string; name: string; video: string | null; kind: ExerciseKind };
+
+/** Choices in a cardio item's dropdown; Treadmill is what Add cardio starts with. "Other" lets you type a name. */
+const CARDIO_TYPES = ['Treadmill', 'Stationary bike', 'Elliptical', 'Rowing machine', 'Stair climber', 'Outdoor run', 'Walk'];
 
 /**
  * Template editor screen.
@@ -46,6 +50,8 @@ export default function TemplateEditor() {
   const [netBad, setNetBad] = useState(false);
   const [netHelp, setNetHelp] = useState(false);
   const nextKey = useRef(0);
+  const list = useRef<FlatList<Row>>(null);
+  const addFocused = useRef(false);
   const newKey = () => `k${nextKey.current++}`;
   // Video files known to this screen: the ones already saved, and the ones recorded here.
   const savedVideos = useRef(new Set<string>());
@@ -64,7 +70,7 @@ export default function TemplateEditor() {
         if (!t) return setMissing(true);
         setName(t.name);
         setNotes(t.notes ?? '');
-        setRows(t.exercises.map((e) => ({ key: newKey(), name: e.name, video: e.video_path })));
+        setRows(t.exercises.map((e) => ({ key: newKey(), name: e.name, video: e.video_path, kind: e.kind })));
         t.exercises.forEach((e) => e.video_path && savedVideos.current.add(e.video_path));
       })
       .catch((e: unknown) => setError(String(e)))
@@ -74,9 +80,16 @@ export default function TemplateEditor() {
   const addExercise = () => {
     const n = draft.trim();
     if (!n) return;
-    setRows((r) => [...r, { key: newKey(), name: n, video: null }]);
+    setRows((r) => [...r, { key: newKey(), name: n, video: null, kind: 'strength' }]);
     setDraft('');
   };
+  /** Adds timed cardio: Treadmill, or the typed name if there is one. The row's dropdown changes it. */
+  const addCardio = () => {
+    setRows((r) => [...r, { key: newKey(), name: draft.trim() || CARDIO_TYPES[0], video: null, kind: 'cardio' }]);
+    setDraft('');
+  };
+  /** Keeps the add field fully above the keyboard: the list shrinks when it opens and grows with each added exercise. */
+  const keepAddVisible = () => { if (addFocused.current) list.current?.scrollToEnd(); };
   const renameRow = useCallback((key: string, n: string) => setRows((r) => r.map((x) => (x.key === key ? { ...x, name: n } : x))), []);
   const removeRow = useCallback((key: string) => setRows((r) => r.filter((x) => x.key !== key)), []);
   const openVideo = useCallback((key: string) => {
@@ -125,8 +138,9 @@ export default function TemplateEditor() {
     if (!trimmed) return setNameError('Give this workout a name.');
     setSaving(true);
     try {
-      const exercises = rows.filter((r) => r.name.trim()).map((r) => ({ name: r.name.trim(), video_path: r.video }));
-      if (draft.trim()) exercises.push({ name: draft.trim(), video_path: null }); // don't lose a typed-but-not-added exercise
+      // A cardio item left unnamed ("Other" with nothing typed) is kept as "Cardio"; blank exercises are dropped.
+      const exercises = rows.map((r) => ({ name: r.name.trim() || (r.kind === 'cardio' ? 'Cardio' : ''), video_path: r.video, kind: r.kind })).filter((e) => e.name);
+      if (draft.trim()) exercises.push({ name: draft.trim(), video_path: null, kind: 'strength' }); // don't lose a typed-but-not-added exercise
       await saveTemplate({ id, name: trimmed, notes: notes.trim() || null, exercises });
       done.current = true;
       dropUnusedVideos(new Set(exercises.map((e) => e.video_path).filter((p): p is string => !!p)));
@@ -182,14 +196,18 @@ export default function TemplateEditor() {
     );
 
   return (
-    <KeyboardAvoidingView style={{ flex: 1, backgroundColor: colors.background }} behavior={Platform.OS === 'ios' ? 'padding' : undefined} keyboardVerticalOffset={100}>
+    <KeyboardAvoidingView style={{ flex: 1, backgroundColor: colors.background }} behavior="padding" keyboardVerticalOffset={100}>
       {header}
       <ReorderableList
+        ref={list}
+        onLayout={keepAddVisible}
+        onContentSizeChange={keepAddVisible}
         data={rows}
         keyExtractor={(r) => r.key}
         onReorder={({ from, to }) => setRows((r) => reorderItems(r, from, to))}
         itemLayoutAnimation={LinearTransition}
         keyboardShouldPersistTaps="handled"
+        keyboardDismissMode="on-drag" // keyboard stays up between entries; scrolling or Back hides it
         contentContainerStyle={{ paddingBottom: 48 }}
         renderItem={({ item }) => <ExerciseRow row={item} onRename={renameRow} onRemove={removeRow} onVideo={openVideo} />}
         ListHeaderComponent={
@@ -202,6 +220,7 @@ export default function TemplateEditor() {
               error={!!nameError}
               autoFocus={id === undefined}
               placeholder="Upper Body"
+              submitBehavior="submit"
             />
             <HelperText type="error" visible={!!nameError}>{nameError}</HelperText>
             <TextInput label="Notes (optional)" value={notes} onChangeText={setNotes} multiline />
@@ -218,11 +237,15 @@ export default function TemplateEditor() {
                 value={draft}
                 onChangeText={setDraft}
                 onSubmitEditing={addExercise}
+                onFocus={() => { addFocused.current = true; }}
+                onBlur={() => { addFocused.current = false; }}
                 submitBehavior="submit"
                 returnKeyType="done"
               />
               <IconButton icon="plus" mode="contained" onPress={addExercise} disabled={!draft.trim()} accessibilityLabel="Add exercise" />
             </View>
+            <Button icon="run" mode="outlined" onPress={addCardio} style={{ alignSelf: 'flex-start', marginTop: 8 }}>Add cardio</Button>
+            <HelperText type="info" style={{ paddingHorizontal: 0 }}>Cardio is timed: Start, Pause, then Finish to add heart rate and calories.</HelperText>
             {id !== undefined && (
               <Button icon="delete-outline" textColor={colors.error} onPress={confirmDelete} style={{ marginTop: 32, alignSelf: 'flex-start' }}>
                 Delete workout
@@ -306,25 +329,46 @@ type RowProps = {
 
 /**
  * One exercise row: drag handle, editable name, video button, remove button.
+ * Cardio rows also get a dropdown of common cardio types; "Other" clears the name so you can type your own.
  * @param props - The row and its change handlers
  * @returns The row
  */
 const ExerciseRow = memo(function ExerciseRow({ row, onRename, onRemove, onVideo }: RowProps) {
   const drag = useReorderableDrag();
   const { colors } = useTheme();
+  const [picking, setPicking] = useState(false);
+  const pick = (name: string) => {
+    setPicking(false);
+    onRename(row.key, name);
+  };
   return (
     <View style={[styles.row, { backgroundColor: colors.surface, borderColor: colors.outlineVariant }]}>
       <Pressable onPressIn={drag} hitSlop={8} accessibilityLabel={`Reorder ${row.name}`} accessibilityRole="button" style={styles.handle}>
         <MaterialCommunityIcons name="drag-horizontal-variant" size={24} color={colors.onSurfaceVariant} />
       </Pressable>
+      {row.kind === 'cardio' && <MaterialCommunityIcons name="run" size={20} color={colors.primary} accessibilityLabel="Cardio" />}
       <TextInput
+        placeholder={row.kind === 'cardio' ? 'Name it, e.g. Jump rope' : undefined}
         dense
         style={{ flex: 1, backgroundColor: 'transparent' }}
         underlineColor="transparent"
         value={row.name}
         onChangeText={(t) => onRename(row.key, t)}
+        submitBehavior="submit"
         accessibilityLabel="Exercise name"
       />
+      {row.kind === 'cardio' && (
+        <Menu
+          visible={picking}
+          onDismiss={() => setPicking(false)}
+          anchor={<IconButton icon="menu-down" onPress={() => setPicking(true)} accessibilityLabel={`Cardio type: ${row.name || 'Other'}. Tap to change.`} />}
+        >
+          {CARDIO_TYPES.map((t) => (
+            <Menu.Item key={t} title={t} onPress={() => pick(t)} titleStyle={t === row.name ? { color: colors.primary, fontWeight: 'bold' } : undefined} />
+          ))}
+          <Menu.Item title="Other…" onPress={() => pick('')} titleStyle={!CARDIO_TYPES.includes(row.name) ? { color: colors.primary, fontWeight: 'bold' } : undefined} />
+        </Menu>
+      )}
       <IconButton
         icon={row.video ? 'play-box' : 'video-plus-outline'}
         iconColor={row.video ? colors.primary : colors.onSurfaceVariant}

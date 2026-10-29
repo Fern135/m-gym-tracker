@@ -5,12 +5,13 @@
  * as an async function.
  */
 import * as SQLite from 'expo-sqlite';
+import type { LoggedSet } from './workout';
 
 /** Shared connection; a module singleton so non-React code (notifications) can query too. */
 const db = SQLite.openDatabaseSync('ironweek.db');
 
 /** Bump when the schema changes and add a migration step in initDb. */
-const SCHEMA_VERSION = 4;
+const SCHEMA_VERSION = 6;
 
 /** Default settings seeded on first launch and restored by "Clear everything". */
 export const DEFAULT_SETTINGS = {
@@ -25,6 +26,8 @@ export const DEFAULT_SETTINGS = {
   first_day_of_week: '1',
   rest_seconds: '90',
   default_sets: '3',
+  // 'true' shows the ✓ next to Reps/Weight that logs a set without starting the rest timer.
+  quick_log: 'false',
   rest_sound: 'classic',
   // Sound for the evening-before reminder only; the others use the phone's default.
   reminder_sound: 'chime',
@@ -127,6 +130,18 @@ DROP TABLE log_photos;
 `;
 
 /**
+ * v4 → v6: cardio inside workouts. A workout's exercise can be timed cardio, and a logged
+ * cardio entry keeps its time, average heart rate and calories (both optional) in log_sets.
+ * Everything existing stays strength. (v5 only existed in test builds of a standalone Cardio workout.)
+ */
+const MIGRATE_V6_SQL = `
+ALTER TABLE template_exercises ADD COLUMN kind TEXT NOT NULL DEFAULT 'strength';
+ALTER TABLE log_sets ADD COLUMN duration_seconds INTEGER;
+ALTER TABLE log_sets ADD COLUMN heart_rate INTEGER;
+ALTER TABLE log_sets ADD COLUMN calories INTEGER;
+`;
+
+/**
  * v1 → v2: adds 'missed' to the status CHECK (SQLite can't alter a CHECK, so the
  * table is rebuilt and rows copied), a one-log-per-date index, and the breaks table.
  * Order matters: build new, copy, drop old, rename new. Renaming the old table
@@ -175,7 +190,13 @@ export async function initDb(): Promise<void> {
       await txn.execAsync(MIGRATE_V3_SQL);
       version = 3;
     }
-    if (version === 3) await txn.execAsync(MIGRATE_V4_SQL);
+    if (version === 3) {
+      await txn.execAsync(MIGRATE_V4_SQL);
+      version = 4;
+    }
+    // Test builds at v5 added a built-in Cardio workout; it's replaced by cardio exercises, so remove it.
+    if (version === 5) await txn.execAsync("DELETE FROM workout_templates WHERE kind = 'cardio'");
+    if (version === 4 || version === 5) await txn.execAsync(MIGRATE_V6_SQL);
     await txn.execAsync(`PRAGMA user_version = ${SCHEMA_VERSION}`);
     for (const [key, value] of Object.entries(DEFAULT_SETTINGS)) {
       await txn.runAsync('INSERT OR IGNORE INTO settings (key, value) VALUES (?, ?)', key, value);
@@ -216,9 +237,11 @@ export async function getAllSettings(): Promise<Partial<Record<SettingKey, strin
 // ─── Workout templates ───────────────────────────────────────────────────────
 
 export type TemplateSummary = { id: number; name: string; exercise_count: number };
-export type TemplateExercise = { id: number; name: string; sort_order: number; video_path: string | null };
+/** Strength exercises log sets of reps and weight; cardio ones log a timed entry. */
+export type ExerciseKind = 'strength' | 'cardio';
+export type TemplateExercise = { id: number; name: string; sort_order: number; video_path: string | null; kind: ExerciseKind };
 export type Template = { id: number; name: string; notes: string | null; created_at: string; exercises: TemplateExercise[] };
-export type TemplateInput = { id?: number; name: string; notes: string | null; exercises: { name: string; video_path: string | null }[] };
+export type TemplateInput = { id?: number; name: string; notes: string | null; exercises: { name: string; video_path: string | null; kind: ExerciseKind }[] };
 
 /**
  * Lists every template with how many exercises it has, alphabetically.
@@ -241,7 +264,7 @@ export async function getTemplate(id: number): Promise<Template | null> {
   const t = await db.getFirstAsync<Omit<Template, 'exercises'>>('SELECT * FROM workout_templates WHERE id = ?', id);
   if (!t) return null;
   const exercises = await db.getAllAsync<TemplateExercise>(
-    'SELECT id, name, sort_order, video_path FROM template_exercises WHERE template_id = ? ORDER BY sort_order',
+    'SELECT id, name, sort_order, video_path, kind FROM template_exercises WHERE template_id = ? ORDER BY sort_order',
     id,
   );
   return { ...t, exercises };
@@ -275,7 +298,7 @@ export async function saveTemplate(input: TemplateInput): Promise<number> {
       id = r.lastInsertRowId;
     }
     for (const [i, ex] of input.exercises.entries()) {
-      await txn.runAsync('INSERT INTO template_exercises (template_id, name, sort_order, video_path) VALUES (?, ?, ?, ?)', id, ex.name, i, ex.video_path);
+      await txn.runAsync('INSERT INTO template_exercises (template_id, name, sort_order, video_path, kind) VALUES (?, ?, ?, ?, ?)', id, ex.name, i, ex.video_path, ex.kind);
     }
   });
   return id;
@@ -461,7 +484,8 @@ export async function skipWorkout(input: { template_id: number | null; template_
   );
 }
 
-export type LogDetail = LogSummary & { exercises: { name: string; sets: { reps: number | null; weight: number | null }[] }[] };
+/** cardio is true when the exercise's entries are timed (they have seconds). */
+export type LogDetail = LogSummary & { exercises: { name: string; cardio?: boolean; sets: LoggedSet[] }[] };
 
 /**
  * One date's log with its sets grouped by exercise, in the order they were logged.
@@ -474,15 +498,18 @@ export async function getLogDetail(date: string): Promise<LogDetail | null> {
     date,
   );
   if (!log) return null;
-  const rows = await db.getAllAsync<{ exercise_name: string; reps: number | null; weight: number | null }>(
-    'SELECT exercise_name, reps, weight FROM log_sets WHERE log_id = ? ORDER BY id',
+  const rows = await db.getAllAsync<{ exercise_name: string; reps: number | null; weight: number | null; duration_seconds: number | null; heart_rate: number | null; calories: number | null }>(
+    'SELECT exercise_name, reps, weight, duration_seconds, heart_rate, calories FROM log_sets WHERE log_id = ? ORDER BY id',
     log.id,
   );
   const exercises: LogDetail['exercises'] = [];
   for (const r of rows) {
     let ex = exercises.find((e) => e.name === r.exercise_name);
-    if (!ex) exercises.push((ex = { name: r.exercise_name, sets: [] }));
-    ex.sets.push({ reps: r.reps, weight: r.weight });
+    if (!ex) exercises.push((ex = { name: r.exercise_name, cardio: false, sets: [] }));
+    if (r.duration_seconds !== null) {
+      ex.cardio = true;
+      ex.sets.push({ reps: null, weight: null, seconds: r.duration_seconds, heartRate: r.heart_rate, calories: r.calories });
+    } else ex.sets.push({ reps: r.reps, weight: r.weight });
   }
   return { ...log, exercises };
 }
@@ -492,7 +519,7 @@ export type CompletedLogInput = {
   template_id: number | null;
   template_name: string;
   notes: string | null;
-  exercises: { name: string; sets: { reps: number | null; weight: number | null }[] }[];
+  exercises: { name: string; sets: LoggedSet[] }[];
   /** Omit when editing; the original times are kept. */
   duration_seconds?: number;
   rest_seconds?: number;
@@ -523,8 +550,8 @@ export async function saveCompletedLog(input: CompletedLogInput): Promise<void> 
     for (const ex of input.exercises) {
       for (const [i, set] of ex.sets.entries()) {
         await txn.runAsync(
-          'INSERT INTO log_sets (log_id, exercise_name, set_number, reps, weight) VALUES (?, ?, ?, ?, ?)',
-          row.id, ex.name, i + 1, set.reps, set.weight,
+          'INSERT INTO log_sets (log_id, exercise_name, set_number, reps, weight, duration_seconds, heart_rate, calories) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+          row.id, ex.name, i + 1, set.reps, set.weight, set.seconds ?? null, set.heartRate ?? null, set.calories ?? null,
         );
       }
     }

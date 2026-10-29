@@ -3,7 +3,15 @@
  * @description Assert-based checks for workout.ts. Run with: npm test
  */
 import assert from 'node:assert/strict';
-import { formatClock, formatDuration, formatSet, parseNum, setsLeftLabel } from './workout';
+import { clockElapsedMs, formatClock, formatDuration, formatSet, formatStopwatch, parseNum, setsLeftLabel } from './workout';
+
+// Cardio clock: 10 min since start, 2 min paused earlier, paused again for the last 1 min → 7 min.
+assert.equal(clockElapsedMs({ startedAt: 0, pausedMs: 120_000, pausedAt: 540_000 }, 600_000), 420_000);
+assert.equal(clockElapsedMs({ startedAt: 0, pausedMs: 0, pausedAt: null }, 65_000), 65_000);
+assert.equal(formatSet({ reps: null, weight: null, seconds: 720, heartRate: 142, calories: 310 }, 'lbs'), '12 min · 142 bpm · 310 kcal');
+assert.equal(formatSet({ reps: null, weight: null, seconds: 720, heartRate: null, calories: null }, 'lbs'), '12 min');
+assert.equal(formatStopwatch(245), '4:05');
+assert.equal(formatStopwatch(3729), '1:02:09');
 
 assert.equal(setsLeftLabel(0, 3), '3 sets left');
 assert.equal(setsLeftLabel(2, 3), '1 set left');

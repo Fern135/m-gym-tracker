@@ -2,6 +2,7 @@
  * @file LogForm.tsx
  * @description Editable list of exercises and their sets plus notes. Used to
  * review a workout before completing it and to edit a completed one.
+ * Cardio items edit minutes, heart rate and calories instead of reps and weight.
  */
 import { useState } from 'react';
 import { StyleSheet, View } from 'react-native';
@@ -45,7 +46,18 @@ export function LogForm({ exercises, onChange, notes, onNotesChange, unit }: Pro
             <IconButton icon="delete-outline" size={20} onPress={() => onChange(exercises.filter((_, j) => j !== i))} accessibilityLabel={`Remove ${ex.name}`} />
           </View>
           {ex.sets.length === 0 && <Text variant="bodySmall" style={{ color: colors.onSurfaceVariant }}>No sets logged.</Text>}
-          {ex.sets.map((set, s) => (
+          {ex.cardio && ex.sets.map((set, s) => (
+            <View key={`${s}-${ex.sets.length}`} style={styles.setRow}>
+              <NumberField dense label="Minutes" value={Math.round((set.seconds ?? 0) / 6) / 10} style={styles.field}
+                onChange={(m) => update(i, (e) => ({ ...e, sets: e.sets.map((x, k) => (k === s ? { ...x, seconds: Math.round((m ?? 0) * 60) } : x)) }))} />
+              <NumberField dense integer label="bpm" value={set.heartRate ?? null} style={styles.field}
+                onChange={(heartRate) => update(i, (e) => ({ ...e, sets: e.sets.map((x, k) => (k === s ? { ...x, heartRate } : x)) }))} />
+              <NumberField dense integer label="kcal" value={set.calories ?? null} style={styles.field}
+                onChange={(calories) => update(i, (e) => ({ ...e, sets: e.sets.map((x, k) => (k === s ? { ...x, calories } : x)) }))} />
+              <IconButton icon="close" size={18} onPress={() => update(i, (e) => ({ ...e, sets: e.sets.filter((_, k) => k !== s) }))} accessibilityLabel={`Remove entry ${s + 1}`} />
+            </View>
+          ))}
+          {!ex.cardio && ex.sets.map((set, s) => (
             <View key={`${s}-${ex.sets.length}`} style={styles.setRow}>
               <Text variant="labelLarge" style={styles.setNo}>Set {s + 1}</Text>
               <NumberField dense integer label="Reps" value={set.reps} style={styles.field}
@@ -56,14 +68,14 @@ export function LogForm({ exercises, onChange, notes, onNotesChange, unit }: Pro
             </View>
           ))}
           <Button icon="plus" compact style={{ alignSelf: 'flex-start' }}
-            onPress={() => update(i, (e) => ({ ...e, sets: [...e.sets, e.sets[e.sets.length - 1] ?? { reps: null, weight: null }] }))}>
-            Add set
+            onPress={() => update(i, (e) => ({ ...e, sets: [...e.sets, e.sets[e.sets.length - 1] ?? (e.cardio ? { reps: null, weight: null, seconds: 0 } : { reps: null, weight: null })] }))}>
+            {ex.cardio ? 'Add entry' : 'Add set'}
           </Button>
         </View>
       ))}
 
       <View style={styles.addRow}>
-        <TextInput mode="outlined" style={{ flex: 1 }} placeholder="Add an exercise" value={newName} onChangeText={setNewName} onSubmitEditing={addExercise} />
+        <TextInput mode="outlined" style={{ flex: 1 }} placeholder="Add an exercise" value={newName} onChangeText={setNewName} onSubmitEditing={addExercise} submitBehavior="submit" />
         <IconButton icon="plus" mode="contained" onPress={addExercise} disabled={!newName.trim()} accessibilityLabel="Add exercise" />
       </View>
 

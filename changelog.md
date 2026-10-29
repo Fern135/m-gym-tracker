@@ -2,6 +2,14 @@
 
 Every commit adds an entry here, newest first.
 
+## 1.0.2 — October 29, 2026
+
+- On Android, the screen now moves up when the keyboard opens, so the field you're typing in stays above the keyboard instead of hiding behind it (workout editor and workout logging).
+- The keyboard stays open after you press ✓, so you can type several exercises in a row. Scroll the list or press Back to hide it.
+- **Cardio inside workouts:** when editing a workout (like Upper Body), tap **Add cardio** to add a timed item. It starts as **Treadmill**; its dropdown switches it to Stationary bike, Elliptical, Rowing machine, Stair climber, Outdoor run, Walk, or **Other** to type your own. During the workout it has a clock that counts up: **Start**, **Pause**/**Resume**, then **Finish** to add your average heart rate and calories burned (both optional). It's saved like "12 min · 142 bpm · 310 kcal". Your existing workouts and history are not changed.
+- The ✓ next to Reps and Weight (log a set without starting the rest timer) is now hidden by default. Turn it back on in Settings with **Log without resting button**.
+- New **About** section in Settings shows the app version, and **What's new** opens this changelog inside the app.
+
 ## 1.0.1 — October 28, 2026
 
 - The rest timer alarm now plays as a real alarm, so you hear it even when the phone is on vibrate or locked.

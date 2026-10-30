@@ -16,4 +16,8 @@ assert.deepEqual(parseChangelog(md), [
 const real = parseChangelog(readFileSync(new URL('../changelog.md', import.meta.url), 'utf8'));
 assert.ok(real.length >= 2 && real.every((e) => /^\d+\.\d+\.\d+ — \w+ \d{1,2}, \d{4}$/.test(e.heading) && e.bullets.length > 0));
 
+// The app shows lib/changelog.content.ts; it must match changelog.md (run `npm run changelog` after editing).
+import content from './changelog.content';
+assert.equal(content, readFileSync(new URL('../changelog.md', import.meta.url), 'utf8'), 'lib/changelog.content.ts is out of date: run npm run changelog');
+
 console.log('changelog.test.ts: all passed');

@@ -48,7 +48,8 @@
     "typecheck": "tsc --noEmit",
     "test": "npx -y tsx lib/week.test.ts && npx -y tsx lib/workout.test.ts && npx -y tsx lib/reminders.test.ts && npx -y tsx lib/changelog.test.ts",
     "lint": "eslint .",
-    "phone:android": "ANDROID_HOME=\"$HOME/Library/Android/sdk\" JAVA_HOME=\"/Applications/Android Studio.app/Contents/jbr/Contents/Home\" expo run:android --variant release",
+    "changelog": "node scripts/sync-changelog.js",
+    "phone:android": "node scripts/sync-changelog.js && ANDROID_HOME=\"$HOME/Library/Android/sdk\" JAVA_HOME=\"/Applications/Android Studio.app/Contents/jbr/Contents/Home\" expo run:android --variant release",
     "phone:ios": "expo run:ios --device --configuration Release"
   },
   "private": true

@@ -3,6 +3,7 @@
  * @description The workout screen for one date.
  * - Intro: what's planned, Start or Skip (or Log it anyway for a skipped/missed day).
  * - Guided: one exercise at a time with a sets-left counter, Rest timer and Next exercise.
+ *   Each exercise shows what was logged for it last time (the last day it had any sets).
  *   A cardio item instead has a clock that counts up (Start, Pause, Finish), then heart rate and calories.
  * - Review: edit everything, add notes, Complete workout.
  * - Done: total time, active time and rest time for the session just completed.
@@ -21,13 +22,13 @@ import { ExerciseVideo } from '../../../components/ExerciseVideo';
 import { NumberField } from '../../../components/NumberField';
 import { ReasonDialog } from '../../../components/ReasonDialog';
 import { RestTimer } from '../../../components/RestTimer';
-import { getLogDetail, getSchedule, getTemplate, listTemplates, saveCompletedLog, skipWorkout, updateLogNotes, type LogDetail, type TemplateSummary } from '../../../lib/db';
+import { getLastSets, getLogDetail, getSchedule, getTemplate, listTemplates, saveCompletedLog, skipWorkout, updateLogNotes, type LogDetail, type TemplateSummary } from '../../../lib/db';
 import { rescheduleAll } from '../../../lib/notifications';
 import { getWorkoutDraft, setWorkoutDraft } from '../../../lib/settings';
 import { useAppStore } from '../../../lib/store';
 import { FONT, plate } from '../../../lib/theme';
 import { toDateStr } from '../../../lib/week';
-import { clockElapsedMs, formatClock, formatDuration, formatSet, formatStopwatch, setsLeftLabel, type DraftExercise, type LoggedSet, type WorkoutDraft } from '../../../lib/workout';
+import { clockElapsedMs, formatClock, formatDuration, formatSet, formatStopwatch, setsLeftLabel, summarizeSets, type DraftExercise, type LoggedSet, type WorkoutDraft } from '../../../lib/workout';
 
 const SKIP_REASONS = ['Short on time', 'Feeling unwell', 'Low energy', 'Hungry', 'Sore'];
 
@@ -232,7 +233,12 @@ export default function LogScreen() {
           </View>
         ))}
         {log.exercises.length === 0 && <Text style={{ color: colors.onSurfaceVariant }}>No sets were logged.</Text>}
-        {log.notes && <Text variant="bodyLarge" style={{ marginTop: 12 }}>{log.notes}</Text>}
+        {log.notes && (
+          <View style={[styles.card, { backgroundColor: colors.surface, marginTop: 4 }]}>
+            <Text style={[styles.exName, { color: colors.onSurface }]}>Notes</Text>
+            <Text variant="bodyLarge" style={{ color: colors.onSurfaceVariant }}>{log.notes}</Text>
+          </View>
+        )}
       </>
     );
   } else {
@@ -367,6 +373,15 @@ function Guided({ draft, setDraft, unit, restSeconds, targetSets, quickLog, onFi
   // The next set starts as a copy of the exercise's previous set, since most sets repeat.
   const lastSetOf = (e?: DraftExercise): LoggedSet => e?.sets[e.sets.length - 1] ?? { reps: null, weight: null };
   const [pending, setPending] = useState<LoggedSet>(lastSetOf(ex));
+  const [previous, setPrevious] = useState<{ name: string; date: string; sets: LoggedSet[] } | null>(null);
+  useEffect(() => {
+    if (!ex) return;
+    let live = true;
+    getLastSets(ex.name, draft.date)
+      .then((p) => { if (live) setPrevious(p && { name: ex.name, ...p }); })
+      .catch(() => undefined); // nice to have; the workout works without it
+    return () => { live = false; };
+  }, [ex?.name, draft.date]); // eslint-disable-line react-hooks/exhaustive-deps -- only the name matters, not the whole exercise
 
   const setExercise = (fn: (e: DraftExercise) => DraftExercise) =>
     setDraft({ ...draft, exercises: draft.exercises.map((e, i) => (i === draft.index ? fn(e) : e)) });
@@ -424,6 +439,11 @@ function Guided({ draft, setDraft, unit, restSeconds, targetSets, quickLog, onFi
 
       <View style={[styles.exCard, { backgroundColor: colors.surface, borderLeftColor: plate.blue }]}>
         <Text style={[styles.name, { color: colors.onSurface }]}>{ex.name}</Text>
+        {previous?.name === ex.name && (
+          <Text variant="bodyMedium" style={{ color: colors.onSurfaceVariant }}>
+            Last time ({format(parseISO(previous.date), 'EEE, MMM d')}): {summarizeSets(previous.sets, unit)}
+          </Text>
+        )}
         {ex.video && <ExerciseVideo key={ex.video} path={ex.video} height={190} />}
 
         {ex.sets.map((s, i) => (

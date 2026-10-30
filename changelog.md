@@ -2,6 +2,13 @@
 
 Every commit adds an entry here, newest first.
 
+## 1.0.2 — October 30, 2026
+
+- **Last time** for every exercise: during a workout, each exercise shows what you logged for it the last time you did it, with the number of sets, like "Last time (Fri, Oct 30): 10 reps × 40 lbs (3 sets)". Only days you did at least one set of that exercise count, so an exercise you skipped keeps showing the session before. Cardio shows its time. Use it to see where you're improving and what to focus on.
+- **View workout** now shows your notes under a **Notes** heading, only when you wrote some.
+- New **app icon**: the Ironweek plate, including Android's themed (monochrome) icons.
+- New **splash screen** with the IRONWEEK logo while the app opens, in a light and a dark version that follow your phone's theme.
+
 ## 1.0.1 — October 28, 2026
 
 - The rest timer alarm now plays as a real alarm, so you hear it even when the phone is on vibrate or locked.

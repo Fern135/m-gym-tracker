@@ -99,6 +99,23 @@ export function formatSet(set: LoggedSet, unit: string): string {
 }
 
 /**
+ * Sums up an exercise's sets in one line, grouping repeats in a row.
+ * @param sets - Sets in the order they were logged
+ * @param unit - Weight unit label
+ * @returns e.g. "10 reps × 40 lbs (3 sets)", "12 reps × 40 lbs, 10 reps × 40 lbs (2 sets)"
+ */
+export function summarizeSets(sets: LoggedSet[], unit: string): string {
+  const groups: { text: string; n: number }[] = [];
+  for (const s of sets) {
+    const text = formatSet(s, unit);
+    const last = groups[groups.length - 1];
+    if (last?.text === text) last.n++;
+    else groups.push({ text, n: 1 });
+  }
+  return groups.map((g) => (g.n > 1 ? `${g.text} (${g.n} sets)` : g.text)).join(', ');
+}
+
+/**
  * Formats seconds as m:ss.
  * @param secs - Seconds, clamped at 0
  * @returns e.g. "1:30"

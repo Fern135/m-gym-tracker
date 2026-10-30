@@ -498,7 +498,7 @@ export async function getLogDetail(date: string): Promise<LogDetail | null> {
     date,
   );
   if (!log) return null;
-  const rows = await db.getAllAsync<{ exercise_name: string; reps: number | null; weight: number | null; duration_seconds: number | null; heart_rate: number | null; calories: number | null }>(
+  const rows = await db.getAllAsync<SetRow & { exercise_name: string }>(
     'SELECT exercise_name, reps, weight, duration_seconds, heart_rate, calories FROM log_sets WHERE log_id = ? ORDER BY id',
     log.id,
   );
@@ -506,12 +506,43 @@ export async function getLogDetail(date: string): Promise<LogDetail | null> {
   for (const r of rows) {
     let ex = exercises.find((e) => e.name === r.exercise_name);
     if (!ex) exercises.push((ex = { name: r.exercise_name, cardio: false, sets: [] }));
-    if (r.duration_seconds !== null) {
-      ex.cardio = true;
-      ex.sets.push({ reps: null, weight: null, seconds: r.duration_seconds, heartRate: r.heart_rate, calories: r.calories });
-    } else ex.sets.push({ reps: r.reps, weight: r.weight });
+    if (r.duration_seconds !== null) ex.cardio = true;
+    ex.sets.push(toLoggedSet(r));
   }
   return { ...log, exercises };
+}
+
+type SetRow = { reps: number | null; weight: number | null; duration_seconds: number | null; heart_rate: number | null; calories: number | null };
+
+/** A log_sets row as a LoggedSet: cardio entries (they have a duration) keep time, heart rate and calories. */
+function toLoggedSet(r: SetRow): LoggedSet {
+  return r.duration_seconds !== null
+    ? { reps: null, weight: null, seconds: r.duration_seconds, heartRate: r.heart_rate, calories: r.calories }
+    : { reps: r.reps, weight: r.weight };
+}
+
+/**
+ * What was logged for an exercise the last time it was done: the most recent completed
+ * workout before a date with at least one set of it. Days it was skipped don't count, so
+ * those keep pointing at the older session. Matched by name, ignoring case, across all workouts.
+ * @param exerciseName - Exercise name
+ * @param before - YYYY-MM-DD, exclusive (the day being logged)
+ * @returns That day and its sets of the exercise, or null if it was never logged
+ */
+export async function getLastSets(exerciseName: string, before: string): Promise<{ date: string; sets: LoggedSet[] } | null> {
+  const log = await db.getFirstAsync<{ id: number; date: string }>(
+    `SELECT l.id, l.date FROM workout_logs l
+     WHERE l.status = 'completed' AND l.date < ?
+       AND EXISTS (SELECT 1 FROM log_sets s WHERE s.log_id = l.id AND s.exercise_name = ? COLLATE NOCASE)
+     ORDER BY l.date DESC LIMIT 1`,
+    before, exerciseName,
+  );
+  if (!log) return null;
+  const rows = await db.getAllAsync<SetRow>(
+    'SELECT reps, weight, duration_seconds, heart_rate, calories FROM log_sets WHERE log_id = ? AND exercise_name = ? COLLATE NOCASE ORDER BY id',
+    log.id, exerciseName,
+  );
+  return { date: log.date, sets: rows.map(toLoggedSet) };
 }
 
 export type CompletedLogInput = {

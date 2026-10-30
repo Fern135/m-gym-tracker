@@ -3,7 +3,13 @@
  * @description Assert-based checks for workout.ts. Run with: npm test
  */
 import assert from 'node:assert/strict';
-import { clockElapsedMs, formatClock, formatDuration, formatSet, formatStopwatch, parseNum, setsLeftLabel } from './workout';
+import { clockElapsedMs, formatClock, formatDuration, formatSet, formatStopwatch, parseNum, setsLeftLabel, summarizeSets } from './workout';
+
+// Last-time summary: repeats in a row are grouped, changes keep their order.
+const s10 = { reps: 10, weight: 40 };
+assert.equal(summarizeSets([s10, s10, s10], 'lbs'), '10 reps × 40 lbs (3 sets)');
+assert.equal(summarizeSets([{ reps: 12, weight: 40 }, s10, s10], 'lbs'), '12 reps × 40 lbs, 10 reps × 40 lbs (2 sets)');
+assert.equal(summarizeSets([s10], 'lbs'), '10 reps × 40 lbs');
 
 // Cardio clock: 10 min since start, 2 min paused earlier, paused again for the last 1 min → 7 min.
 assert.equal(clockElapsedMs({ startedAt: 0, pausedMs: 120_000, pausedAt: 540_000 }, 600_000), 420_000);

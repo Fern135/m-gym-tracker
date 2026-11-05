@@ -3,7 +3,9 @@
  * @description The workout screen for one date.
  * - Intro: what's planned, Start or Skip (or Log it anyway for a skipped/missed day).
  * - Guided: one exercise at a time with a sets-left counter, Rest timer and Next exercise.
- *   Each exercise shows what was logged for it last time (the last day it had any sets).
+ *   Each exercise shows what was logged for it last time (the last day it had any sets) and its
+ *   latest note to yourself; Note to yourself at the bottom writes one for next time.
+ *   Fill in set N copies that set's reps and weight from last time into the inputs.
  *   A cardio item instead has a clock that counts up (Start, Pause, Finish), then heart rate and calories.
  * - Review: edit everything, add notes, Complete workout.
  * - Done: total time, active time and rest time for the session just completed.
@@ -22,13 +24,13 @@ import { ExerciseVideo } from '../../../components/ExerciseVideo';
 import { NumberField } from '../../../components/NumberField';
 import { ReasonDialog } from '../../../components/ReasonDialog';
 import { RestTimer } from '../../../components/RestTimer';
-import { getLastSets, getLogDetail, getSchedule, getTemplate, listTemplates, saveCompletedLog, skipWorkout, updateLogNotes, type LogDetail, type TemplateSummary } from '../../../lib/db';
+import { getLastTime, getLogDetail, getSchedule, getTemplate, listTemplates, saveCompletedLog, skipWorkout, updateLogNotes, type LastTime as LastTimeData, type LogDetail, type TemplateSummary } from '../../../lib/db';
 import { rescheduleAll } from '../../../lib/notifications';
 import { getWorkoutDraft, setWorkoutDraft } from '../../../lib/settings';
 import { useAppStore } from '../../../lib/store';
 import { FONT, plate } from '../../../lib/theme';
 import { toDateStr } from '../../../lib/week';
-import { clockElapsedMs, formatClock, formatDuration, formatSet, formatStopwatch, setsLeftLabel, summarizeSets, type DraftExercise, type LoggedSet, type WorkoutDraft } from '../../../lib/workout';
+import { clockElapsedMs, formatClock, formatDuration, formatSet, formatStopwatch, setsLeftLabel, groupSets, type DraftExercise, type LoggedSet, type WorkoutDraft } from '../../../lib/workout';
 
 const SKIP_REASONS = ['Short on time', 'Feeling unwell', 'Low energy', 'Hungry', 'Sore'];
 
@@ -230,6 +232,7 @@ export default function LogScreen() {
             {ex.sets.map((s, j) => (
               <Text key={j} variant="bodyLarge" style={{ color: colors.onSurfaceVariant }}>{ex.cardio ? '' : `Set ${j + 1}   `}{formatSet(s, unit)}</Text>
             ))}
+            {ex.note && <Text variant="bodyMedium" style={{ color: colors.onSurfaceVariant, marginTop: 4 }}>Note to yourself: {ex.note}</Text>}
           </View>
         ))}
         {log.exercises.length === 0 && <Text style={{ color: colors.onSurfaceVariant }}>No sets were logged.</Text>}
@@ -373,11 +376,12 @@ function Guided({ draft, setDraft, unit, restSeconds, targetSets, quickLog, onFi
   // The next set starts as a copy of the exercise's previous set, since most sets repeat.
   const lastSetOf = (e?: DraftExercise): LoggedSet => e?.sets[e.sets.length - 1] ?? { reps: null, weight: null };
   const [pending, setPending] = useState<LoggedSet>(lastSetOf(ex));
-  const [previous, setPrevious] = useState<{ name: string; date: string; sets: LoggedSet[] } | null>(null);
+  const [previous, setPrevious] = useState<(LastTimeData & { name: string }) | null>(null);
+  const [noting, setNoting] = useState<string | null>(null); // note being written, or null when the dialog is closed
   useEffect(() => {
     if (!ex) return;
     let live = true;
-    getLastSets(ex.name, draft.date)
+    getLastTime(ex.name, draft.date)
       .then((p) => { if (live) setPrevious(p && { name: ex.name, ...p }); })
       .catch(() => undefined); // nice to have; the workout works without it
     return () => { live = false; };
@@ -388,6 +392,16 @@ function Guided({ draft, setDraft, unit, restSeconds, targetSets, quickLog, onFi
   // Logging keeps pending as-is, so the next set is pre-filled with the same numbers.
   const logSet = () => setExercise((e) => ({ ...e, sets: [...e.sets, pending] }));
   // Reset pending in the same update as the switch, so the inputs (seeded on remount) and pending never disagree.
+  // Bumped to reseed the Reps/Weight inputs (they read their value on mount) after Fill in.
+  const [filled, setFilled] = useState(0);
+  /** Copies the same set number from last time (or its last set, past the end) into the current set. */
+  const fillFromLast = () => {
+    const from = previous?.sets.filter((s) => s.seconds == null) ?? [];
+    if (!ex || !from.length) return;
+    const src = from[Math.min(ex.sets.length, from.length - 1)];
+    setPending({ reps: src.reps, weight: src.weight });
+    setFilled((n) => n + 1);
+  };
   const goTo = (index: number) => {
     setPending(lastSetOf(draft.exercises[index]));
     setDraft({ ...draft, index });
@@ -440,9 +454,7 @@ function Guided({ draft, setDraft, unit, restSeconds, targetSets, quickLog, onFi
       <View style={[styles.exCard, { backgroundColor: colors.surface, borderLeftColor: plate.blue }]}>
         <Text style={[styles.name, { color: colors.onSurface }]}>{ex.name}</Text>
         {previous?.name === ex.name && (
-          <Text variant="bodyMedium" style={{ color: colors.onSurfaceVariant }}>
-            Last time ({format(parseISO(previous.date), 'EEE, MMM d')}): {summarizeSets(previous.sets, unit)}
-          </Text>
+          <LastTime last={previous} unit={unit} cardio={!!ex.cardio} fillLabel={ex.cardio ? undefined : `Fill in set ${ex.sets.length + 1}`} onFill={fillFromLast} />
         )}
         {ex.video && <ExerciseVideo key={ex.video} path={ex.video} height={190} />}
 
@@ -456,8 +468,8 @@ function Guided({ draft, setDraft, unit, restSeconds, targetSets, quickLog, onFi
         {ex.cardio ? <CardioClock key={draft.index} ex={ex} onChange={setExercise} /> : <>
         <View style={styles.setRow}>
           <Text variant="labelLarge" style={{ width: 44 }}>Set {ex.sets.length + 1}</Text>
-          <NumberField key={`r${draft.index}-${ex.sets.length}`} integer label="Reps" value={pending.reps} onChange={(reps) => setPending((p) => ({ ...p, reps }))} style={{ flex: 1 }} />
-          <NumberField key={`w${draft.index}-${ex.sets.length}`} label="Weight" suffix={unit} value={pending.weight} onChange={(weight) => setPending((p) => ({ ...p, weight }))} style={{ flex: 1.3 }} />
+          <NumberField key={`r${draft.index}-${ex.sets.length}-${filled}`} integer label="Reps" value={pending.reps} onChange={(reps) => setPending((p) => ({ ...p, reps }))} style={{ flex: 1 }} />
+          <NumberField key={`w${draft.index}-${ex.sets.length}-${filled}`} label="Weight" suffix={unit} value={pending.weight} onChange={(weight) => setPending((p) => ({ ...p, weight }))} style={{ flex: 1.3 }} />
           {quickLog && <IconButton icon="check" mode="outlined" onPress={logSet} accessibilityLabel="Log set without resting" />}
         </View>
 
@@ -473,11 +485,72 @@ function Guided({ draft, setDraft, unit, restSeconds, targetSets, quickLog, onFi
       <Button mode="outlined" icon={last ? 'flag-checkered' : 'arrow-right'} onPress={last ? onFinish : () => goTo(draft.index + 1)} style={{ marginTop: 10 }} contentStyle={{ paddingVertical: 6 }}>
         {last ? 'Finish workout' : 'Next exercise'}
       </Button>
-      <Button icon="plus" onPress={() => setAdding(true)} style={{ alignSelf: 'flex-start', marginTop: 8 }}>Add exercise</Button>
+      <View style={styles.bottomRow}>
+        <Button icon="plus" onPress={() => setAdding(true)}>Add exercise</Button>
+        <Button icon="note-edit-outline" onPress={() => setNoting(ex.note ?? '')}>{ex.note ? 'Edit note' : 'Note to yourself'}</Button>
+      </View>
+      {ex.note && <Text variant="bodyMedium" style={{ color: colors.onSurfaceVariant, paddingHorizontal: 12 }}>Your note: {ex.note}</Text>}
+      <Portal>
+        <Dialog visible={noting !== null} onDismiss={() => setNoting(null)}>
+          <Dialog.Title>Note to yourself</Dialog.Title>
+          <Dialog.Content style={{ gap: 8 }}>
+            <Text variant="bodyMedium">About {ex.name}. You&apos;ll see it under Last time next time.</Text>
+            <TextInput mode="outlined" multiline value={noting ?? ''} onChangeText={setNoting} placeholder="e.g. Go up to 45 lbs" autoFocus style={{ minHeight: 88 }} />
+          </Dialog.Content>
+          <Dialog.Actions>
+            <Button onPress={() => setNoting(null)}>Cancel</Button>
+            <Button onPress={() => { setExercise((e) => ({ ...e, note: noting?.trim() || undefined })); setNoting(null); }}>Save</Button>
+          </Dialog.Actions>
+        </Dialog>
+      </Portal>
 
       {resting && <RestTimer seconds={restSeconds} onFinish={(ms) => { setResting(false); setDraft({ ...draft, restMs: draft.restMs + ms }); }} />}
       {addDialog}
     </>
+  );
+}
+
+/**
+ * What was logged for this exercise last time: the date, then one row per run of
+ * identical sets with the count in its own column, so changes read top to bottom,
+ * then the latest note to yourself (with its own date if it's from another day).
+ * @param props - Last sets and note, the weight unit, whether it's cardio (entries, not sets),
+ *   and the Fill in button's label and action (no button without a label or sets)
+ * @returns The panel
+ */
+function LastTime({ last, unit, cardio, fillLabel, onFill }: { last: LastTimeData; unit: string; cardio: boolean; fillLabel?: string; onFill: () => void }) {
+  const { colors } = useTheme();
+  const groups = groupSets(last.sets, unit);
+  const day = (d: string, f: string) => format(parseISO(d), f);
+  const date = last.date ?? last.note!.date;
+  const noteDay = last.note && last.note.date !== last.date ? ` (${day(last.note.date, 'EEE, MMM d')})` : '';
+  return (
+    <View style={[styles.lastTime, { backgroundColor: colors.surfaceVariant }]}>
+    <View style={{ gap: 4 }} accessible accessibilityLabel={`Last time, ${day(date, 'EEEE MMMM d')}: ${groups.map((g) => `${g.n} ${g.n === 1 ? 'set' : 'sets'} of ${g.text}`).join(', ')}${last.note ? `. Note to yourself${noteDay}: ${last.note.text}` : ''}`}>
+      <View style={styles.lastTimeHead}>
+        <Text style={[styles.lastTimeTitle, { color: colors.onSurface }]}>Last time</Text>
+        <Text variant="labelLarge" style={{ color: colors.onSurfaceVariant, fontSize: 13 }}>{day(date, 'EEE, MMM d')}</Text>
+      </View>
+      {groups.map((g, i) => (
+        <View key={i} style={styles.lastTimeRow}>
+          {!cardio && <Text style={[styles.lastTimeCount, { color: colors.onSurface }]}>{g.n} {g.n === 1 ? 'set' : 'sets'}</Text>}
+          <Text variant="bodyLarge" style={{ color: colors.onSurface, flex: 1, fontSize: 15 }}>{g.text}</Text>
+        </View>
+      ))}
+      {last.note && (
+        <View style={[styles.lastTimeNote, { borderTopColor: colors.outlineVariant }]}>
+          <Text style={[styles.lastTimeCount, { color: colors.onSurface }]}>Note{noteDay}</Text>
+          <Text variant="bodyLarge" style={{ color: colors.onSurface, fontSize: 15 }}>{last.note.text}</Text>
+        </View>
+      )}
+    </View>
+      {fillLabel && last.sets.length > 0 && (
+        <Button compact icon="content-copy" onPress={onFill} style={{ alignSelf: 'flex-end', marginRight: -8 }}
+          accessibilityHint="Copies last time's reps and weight into the inputs below">
+          {fillLabel}
+        </Button>
+      )}
+    </View>
   );
 }
 
@@ -578,6 +651,13 @@ const styles = StyleSheet.create({
   exName: { fontFamily: FONT.title, fontSize: 20 },
   navRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 4 },
   exCard: { padding: 16, borderRadius: 8, borderLeftWidth: 8, gap: 6 },
+  bottomRow: { flexDirection: 'row', flexWrap: 'wrap', marginTop: 8 },
+  lastTimeNote: { borderTopWidth: StyleSheet.hairlineWidth, paddingTop: 6, marginTop: 4, gap: 2 },
+  lastTime: { borderRadius: 6, paddingHorizontal: 12, paddingVertical: 10, gap: 4, marginBottom: 4 },
+  lastTimeHead: { flexDirection: 'row', alignItems: 'baseline', justifyContent: 'space-between', marginBottom: 2 },
+  lastTimeTitle: { fontFamily: FONT.title, fontSize: 17 },
+  lastTimeRow: { flexDirection: 'row', alignItems: 'baseline', gap: 12 },
+  lastTimeCount: { fontFamily: FONT.title, fontSize: 16, minWidth: 50, fontVariant: ['tabular-nums'] },
   doneRow: { flexDirection: 'row', alignItems: 'center' },
   setRow: { flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 6 },
   counter: { fontFamily: FONT.title, fontSize: 24, marginTop: 12 },

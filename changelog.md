@@ -2,6 +2,12 @@
 
 Every commit adds an entry here, newest first.
 
+## 1.0.3 — November 5, 2026
+
+- **Last time** is now a tidy panel instead of one long line: the date at the top, then one row per group of sets with the count in its own column, like "3 sets: 10 reps × 40 lbs". Cardio shows one row per entry.
+- **Note to yourself** for each exercise: during a workout, tap **Note to yourself** (next to Add exercise) to write a reminder like "Go up to 45 lbs". Next time you do that exercise, it shows in its **Last time** panel. You can also edit it when you review or edit the workout.
+- **Fill in set** in the Last time panel copies that set's reps and weight from last time into your current set, so you don't have to type them. Tap it again on each new set; you can still change the numbers before logging.
+
 ## 1.0.2 — October 30, 2026
 
 - **Last time** for every exercise: during a workout, each exercise shows what you logged for it the last time you did it, with the number of sets, like "Last time (Fri, Oct 30): 10 reps × 40 lbs (3 sets)". Only days you did at least one set of that exercise count, so an exercise you skipped keeps showing the session before. Cardio shows its time. Use it to see where you're improving and what to focus on.

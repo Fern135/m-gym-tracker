@@ -17,6 +17,8 @@ export type DraftExercise = {
   cardio?: boolean;
   /** Cardio clock while it's running or paused; cleared once the entry is logged. */
   clock?: CardioClock | null;
+  /** Note to yourself about this exercise, shown in its Last time panel next time. */
+  note?: string;
 };
 
 /** A workout in progress. Saved after every change so a killed app can resume it. */
@@ -99,12 +101,12 @@ export function formatSet(set: LoggedSet, unit: string): string {
 }
 
 /**
- * Sums up an exercise's sets in one line, grouping repeats in a row.
+ * Groups repeats in a row, for showing an exercise's sets as a short list.
  * @param sets - Sets in the order they were logged
  * @param unit - Weight unit label
- * @returns e.g. "10 reps × 40 lbs (3 sets)", "12 reps × 40 lbs, 10 reps × 40 lbs (2 sets)"
+ * @returns e.g. [{ text: "12 reps × 40 lbs", n: 1 }, { text: "10 reps × 40 lbs", n: 2 }]
  */
-export function summarizeSets(sets: LoggedSet[], unit: string): string {
+export function groupSets(sets: LoggedSet[], unit: string): { text: string; n: number }[] {
   const groups: { text: string; n: number }[] = [];
   for (const s of sets) {
     const text = formatSet(s, unit);
@@ -112,7 +114,7 @@ export function summarizeSets(sets: LoggedSet[], unit: string): string {
     if (last?.text === text) last.n++;
     else groups.push({ text, n: 1 });
   }
-  return groups.map((g) => (g.n > 1 ? `${g.text} (${g.n} sets)` : g.text)).join(', ');
+  return groups;
 }
 
 /**

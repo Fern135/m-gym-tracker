@@ -11,7 +11,7 @@ import type { LoggedSet } from './workout';
 const db = SQLite.openDatabaseSync('ironweek.db');
 
 /** Bump when the schema changes and add a migration step in initDb. */
-const SCHEMA_VERSION = 6;
+const SCHEMA_VERSION = 7;
 
 /** Default settings seeded on first launch and restored by "Clear everything". */
 export const DEFAULT_SETTINGS = {
@@ -141,6 +141,16 @@ ALTER TABLE log_sets ADD COLUMN heart_rate INTEGER;
 ALTER TABLE log_sets ADD COLUMN calories INTEGER;
 `;
 
+/** v6 → v7: a "note to yourself" per exercise per workout, shown in that exercise's Last time panel next time. */
+const MIGRATE_V7_SQL = `
+CREATE TABLE log_exercise_notes (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  log_id INTEGER NOT NULL REFERENCES workout_logs(id) ON DELETE CASCADE,
+  exercise_name TEXT NOT NULL,
+  note TEXT NOT NULL
+);
+`;
+
 /**
  * v1 → v2: adds 'missed' to the status CHECK (SQLite can't alter a CHECK, so the
  * table is rebuilt and rows copied), a one-log-per-date index, and the breaks table.
@@ -196,7 +206,11 @@ export async function initDb(): Promise<void> {
     }
     // Test builds at v5 added a built-in Cardio workout; it's replaced by cardio exercises, so remove it.
     if (version === 5) await txn.execAsync("DELETE FROM workout_templates WHERE kind = 'cardio'");
-    if (version === 4 || version === 5) await txn.execAsync(MIGRATE_V6_SQL);
+    if (version === 4 || version === 5) {
+      await txn.execAsync(MIGRATE_V6_SQL);
+      version = 6;
+    }
+    if (version === 6) await txn.execAsync(MIGRATE_V7_SQL);
     await txn.execAsync(`PRAGMA user_version = ${SCHEMA_VERSION}`);
     for (const [key, value] of Object.entries(DEFAULT_SETTINGS)) {
       await txn.runAsync('INSERT OR IGNORE INTO settings (key, value) VALUES (?, ?)', key, value);
@@ -485,7 +499,7 @@ export async function skipWorkout(input: { template_id: number | null; template_
 }
 
 /** cardio is true when the exercise's entries are timed (they have seconds). */
-export type LogDetail = LogSummary & { exercises: { name: string; cardio?: boolean; sets: LoggedSet[] }[] };
+export type LogDetail = LogSummary & { exercises: { name: string; cardio?: boolean; sets: LoggedSet[]; note?: string }[] };
 
 /**
  * One date's log with its sets grouped by exercise, in the order they were logged.
@@ -509,6 +523,12 @@ export async function getLogDetail(date: string): Promise<LogDetail | null> {
     if (r.duration_seconds !== null) ex.cardio = true;
     ex.sets.push(toLoggedSet(r));
   }
+  const notes = await db.getAllAsync<{ exercise_name: string; note: string }>('SELECT exercise_name, note FROM log_exercise_notes WHERE log_id = ? ORDER BY id', log.id);
+  for (const n of notes) {
+    const ex = exercises.find((e) => e.name === n.exercise_name);
+    if (ex) ex.note = n.note;
+    else exercises.push({ name: n.exercise_name, cardio: false, sets: [], note: n.note }); // a note on an exercise with no sets
+  }
   return { ...log, exercises };
 }
 
@@ -521,15 +541,24 @@ function toLoggedSet(r: SetRow): LoggedSet {
     : { reps: r.reps, weight: r.weight };
 }
 
+/** An exercise's last sets (date null if never logged) and its most recent note to yourself. */
+export type LastTime = { date: string | null; sets: LoggedSet[]; note: { date: string; text: string } | null };
+
 /**
  * What was logged for an exercise the last time it was done: the most recent completed
  * workout before a date with at least one set of it. Days it was skipped don't count, so
- * those keep pointing at the older session. Matched by name, ignoring case, across all workouts.
+ * those keep pointing at the older session. The note is the latest one written for it, even
+ * on a day with no sets. Matched by name, ignoring case, across all workouts.
  * @param exerciseName - Exercise name
  * @param before - YYYY-MM-DD, exclusive (the day being logged)
- * @returns That day and its sets of the exercise, or null if it was never logged
+ * @returns Last sets and note, or null if there's neither
  */
-export async function getLastSets(exerciseName: string, before: string): Promise<{ date: string; sets: LoggedSet[] } | null> {
+export async function getLastTime(exerciseName: string, before: string): Promise<LastTime | null> {
+  const note = await db.getFirstAsync<{ date: string; text: string }>(
+    `SELECT l.date, n.note AS text FROM log_exercise_notes n JOIN workout_logs l ON l.id = n.log_id
+     WHERE l.date < ? AND n.exercise_name = ? COLLATE NOCASE ORDER BY l.date DESC LIMIT 1`,
+    before, exerciseName,
+  );
   const log = await db.getFirstAsync<{ id: number; date: string }>(
     `SELECT l.id, l.date FROM workout_logs l
      WHERE l.status = 'completed' AND l.date < ?
@@ -537,12 +566,12 @@ export async function getLastSets(exerciseName: string, before: string): Promise
      ORDER BY l.date DESC LIMIT 1`,
     before, exerciseName,
   );
-  if (!log) return null;
+  if (!log) return note ? { date: null, sets: [], note } : null;
   const rows = await db.getAllAsync<SetRow>(
     'SELECT reps, weight, duration_seconds, heart_rate, calories FROM log_sets WHERE log_id = ? AND exercise_name = ? COLLATE NOCASE ORDER BY id',
     log.id, exerciseName,
   );
-  return { date: log.date, sets: rows.map(toLoggedSet) };
+  return { date: log.date, sets: rows.map(toLoggedSet), note };
 }
 
 export type CompletedLogInput = {
@@ -550,7 +579,7 @@ export type CompletedLogInput = {
   template_id: number | null;
   template_name: string;
   notes: string | null;
-  exercises: { name: string; sets: LoggedSet[] }[];
+  exercises: { name: string; sets: LoggedSet[]; note?: string }[];
   /** Omit when editing; the original times are kept. */
   duration_seconds?: number;
   rest_seconds?: number;
@@ -578,7 +607,10 @@ export async function saveCompletedLog(input: CompletedLogInput): Promise<void> 
     const row = await txn.getFirstAsync<{ id: number }>('SELECT id FROM workout_logs WHERE date = ?', input.date);
     if (!row) throw new Error('Workout log was not saved');
     await txn.runAsync('DELETE FROM log_sets WHERE log_id = ?', row.id);
+    await txn.runAsync('DELETE FROM log_exercise_notes WHERE log_id = ?', row.id);
     for (const ex of input.exercises) {
+      const note = ex.note?.trim();
+      if (note) await txn.runAsync('INSERT INTO log_exercise_notes (log_id, exercise_name, note) VALUES (?, ?, ?)', row.id, ex.name, note);
       for (const [i, set] of ex.sets.entries()) {
         await txn.runAsync(
           'INSERT INTO log_sets (log_id, exercise_name, set_number, reps, weight, duration_seconds, heart_rate, calories) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
@@ -635,7 +667,7 @@ export async function getAllLogsForExport(): Promise<LogDetail[]> {
 export async function clearLogs(): Promise<void> {
   // Atomic: half-cleared history would leave sets without logs or breaks explaining nothing.
   await db.withExclusiveTransactionAsync(async (txn) => {
-    await txn.execAsync('DELETE FROM log_sets; DELETE FROM workout_logs; DELETE FROM breaks;');
+    await txn.execAsync('DELETE FROM log_exercise_notes; DELETE FROM log_sets; DELETE FROM workout_logs; DELETE FROM breaks;');
   });
 }
 
@@ -646,7 +678,7 @@ export async function clearEverything(): Promise<void> {
   // Atomic: a crash halfway must not leave, say, a schedule pointing at deleted workouts or settings missing.
   await db.withExclusiveTransactionAsync(async (txn) => {
     await txn.execAsync(`
-      DELETE FROM log_sets; DELETE FROM workout_logs; DELETE FROM breaks;
+      DELETE FROM log_exercise_notes; DELETE FROM log_sets; DELETE FROM workout_logs; DELETE FROM breaks;
       DELETE FROM schedule_entries; DELETE FROM template_exercises; DELETE FROM workout_templates;
       DELETE FROM settings;`);
     for (const [key, value] of Object.entries(DEFAULT_SETTINGS)) {
